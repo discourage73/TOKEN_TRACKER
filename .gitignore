@@ -179,3 +179,23 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# === СПЕЦИФИЧНЫЕ НАСТРОЙКИ ДЛЯ TOKEN BOT ===
+
+# Конфиденциальные данные
+.env
+.env.local
+.env.*.local
+
+# Базы данных с реальными данными
+
+tokens_database.db
+tokens_tracker_database.db
+
+# Логи
+logs/
+*.log
+
+# Конфигурации с токенами (если есть бэкапы)
+config_backup.py
+config.old
