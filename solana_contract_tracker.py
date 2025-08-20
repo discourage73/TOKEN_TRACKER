@@ -221,12 +221,12 @@ def extract_solana_contracts(text):
 
 # SQLite функции для сохранения ВСЕХ токенов
 def init_tracker_db():
-    """Инициализирует таблицу для ВСЕХ токенов с поддержкой raw_api_data."""
+    """Инициализирует таблицу для ВСЕХ токенов."""
     try:
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
-        # Создаем таблицу для ВСЕХ токенов с НОВЫМ столбцом raw_api_data
+        # ОРИГИНАЛЬНАЯ таблица (БЕЗ ИЗМЕНЕНИЙ)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS tokens (
             contract TEXT PRIMARY KEY,
@@ -239,158 +239,124 @@ def init_tracker_db():
             emojis TEXT DEFAULT '',
             updated_at TEXT,
             message_sent INTEGER DEFAULT 0,
-            message_id INTEGER DEFAULT 0,
-            raw_api_data TEXT DEFAULT NULL
+            message_id INTEGER DEFAULT 0
         )
         ''')
         
-        # Если таблица уже существует, добавляем новый столбец
+        # ТОЛЬКО добавляем новый столбец (если его нет)
         try:
             cursor.execute('ALTER TABLE tokens ADD COLUMN raw_api_data TEXT DEFAULT NULL')
-            logger.info("✅ Добавлен столбец raw_api_data в tracker БД")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" in str(e).lower():
-                logger.info("ℹ️ Столбец raw_api_data уже существует в tracker БД")
-            else:
-                logger.warning(f"⚠️ Ошибка при добавлении столбца: {e}")
+            logger.info("✅ Добавлен столбец raw_api_data")
+        except sqlite3.OperationalError:
+            # Столбец уже существует
+            pass
         
-        # Создаем индексы для оптимизации
-        cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_tokens_channel_count 
-        ON tokens(channel_count)
-        ''')
-        
-        cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_tokens_first_seen 
-        ON tokens(first_seen)
-        ''')
-        
-        cursor.execute('''
-        CREATE INDEX IF NOT EXISTS idx_tokens_message_sent 
-        ON tokens(message_sent)
-        ''')
+        # Остальные индексы БЕЗ ИЗМЕНЕНИЙ
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_channel_count ON tokens(channel_count)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_first_seen ON tokens(first_seen)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_message_sent ON tokens(message_sent)')
         
         conn.commit()
         conn.close()
-        logger.info("✅ SQLite таблица для ВСЕХ токенов инициализирована с поддержкой raw_api_data")
+        logger.info("✅ Таблица tracker инициализирована")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка при инициализации SQLite БД: {e}")
+        logger.error(f"❌ Ошибка инициализации: {e}")
 
 def save_tokens_to_db():
-    """Сохраняет ВСЕ данные tokens_db в SQLite базу данных ВКЛЮЧАЯ raw_api_data."""
+    """ОРИГИНАЛЬНАЯ функция + только raw_api_data"""
     try:
-        logger.info("💾 Начинаем сохранение токенов в SQLite БД включая raw_api_data...")
-        
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
-        saved_count = 0
-        
         for contract, data in tokens_db.items():
-            try:
-                # Получаем все необходимые поля
-                channels = json.dumps(data.get("channels", []), ensure_ascii=False)
-                channel_times = json.dumps(data.get("channel_times", {}), ensure_ascii=False)
-                channel_count = data.get("channel_count", 0)
-                first_seen = data.get("first_seen", "")
-                signal_reached_time = data.get("signal_reached_time")
-                time_to_threshold = data.get("time_to_threshold")
-                emojis = data.get("emojis", "")
-                message_sent = 1 if data.get("message_sent", False) else 0
-                message_id = data.get("message_id", 0)
-                
-                # 🆕 ПОЛУЧАЕМ raw_api_data из структуры токена
-                raw_api_data_json = None
-                if "raw_api_data" in data and data["raw_api_data"]:
-                    raw_api_data_json = json.dumps(data["raw_api_data"], ensure_ascii=False)
-                
-                current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                # ОБНОВЛЕННЫЙ SQL запрос с raw_api_data
-                cursor.execute('''
-                INSERT OR REPLACE INTO tokens (
-                    contract, channels, channel_times, channel_count, first_seen,
-                    signal_reached_time, time_to_threshold, emojis, updated_at,
-                    message_sent, message_id, raw_api_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    contract, channels, channel_times, channel_count, first_seen,
-                    signal_reached_time, time_to_threshold, emojis, current_time,
-                    message_sent, message_id, raw_api_data_json
-                ))
-                
-                saved_count += 1
-                
-            except Exception as e:
-                logger.error(f"❌ Ошибка при сохранении токена {contract}: {e}")
-                continue
+            # ОРИГИНАЛЬНАЯ логика (БЕЗ ИЗМЕНЕНИЙ)
+            channels = ', '.join(data.get('channels', []))
+            channel_times = json.dumps(data.get('channel_times', {}), ensure_ascii=False)
+            channel_count = data.get('channel_count', 0)
+            first_seen = data.get('first_seen', '')
+            signal_reached_time = data.get('signal_reached_time', None)
+            time_to_threshold = data.get('time_to_threshold', None)
+            message_sent = 1 if data.get('message_sent', False) else 0
+            message_id = data.get('message_id', 0)
+            emojis = data.get('emojis', '')
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # ТОЛЬКО добавляем raw_api_data
+            raw_api_data_json = None
+            if "raw_api_data" in data and data["raw_api_data"]:
+                raw_api_data_json = json.dumps(data["raw_api_data"], ensure_ascii=False)
+            
+            # ОРИГИНАЛЬНЫЙ SQL + raw_api_data
+            cursor.execute('''
+            INSERT OR REPLACE INTO tokens 
+            (contract, channels, channel_times, channel_count, first_seen, signal_reached_time, 
+             time_to_threshold, message_sent, message_id, emojis, updated_at, raw_api_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (contract, channels, channel_times, channel_count, first_seen, signal_reached_time,
+                  time_to_threshold, message_sent, message_id, emojis, current_time, raw_api_data_json))
         
         conn.commit()
         conn.close()
-        
-        logger.info(f"✅ Сохранено {saved_count} токенов в SQLite БД включая raw_api_data")
+        logger.info(f"✅ Сохранено {len(tokens_db)} токенов")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка при сохранении в SQLite БД: {e}")
+        logger.error(f"❌ Ошибка сохранения: {e}")
 
+# В функции load_tokens_from_db() ТОЛЬКО добавить загрузку raw_api_data:
 def load_tokens_from_db():
-    """Загружает ВСЕ токены из SQLite базы данных ВКЛЮЧАЯ raw_api_data."""
+    """ОРИГИНАЛЬНАЯ функция + только raw_api_data"""
     global tokens_db
     
     try:
-        logger.info("📂 Загружаем токены из SQLite БД включая raw_api_data...")
-        
         conn = sqlite3.connect(TRACKER_DB_PATH)
-        conn.row_factory = sqlite3.Row  # Для доступа к колонкам по именам
         cursor = conn.cursor()
         
         cursor.execute('SELECT * FROM tokens')
         rows = cursor.fetchall()
         
-        loaded_count = 0
+        column_names = [description[0] for description in cursor.description]
         
         for row in rows:
-            try:
-                contract = row['contract']
-                
-                # Восстанавливаем структуру данных
-                token_data = {
-                    "channels": json.loads(row['channels']) if row['channels'] else [],
-                    "channel_times": json.loads(row['channel_times']) if row['channel_times'] else {},
-                    "channel_count": row['channel_count'],
-                    "first_seen": row['first_seen'],
-                    "signal_reached_time": row['signal_reached_time'],
-                    "time_to_threshold": row['time_to_threshold'],
-                    "emojis": row['emojis'] or "",
-                    "message_sent": bool(row['message_sent']),
-                    "message_id": row['message_id'] or 0
-                }
-                
-                # 🆕 ЗАГРУЖАЕМ raw_api_data если есть
-                if row['raw_api_data']:
-                    try:
-                        token_data["raw_api_data"] = json.loads(row['raw_api_data'])
-                        logger.debug(f"📊 Raw API данные загружены для {contract}")
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"⚠️ Ошибка при загрузке raw API данных для {contract}: {e}")
-                        token_data["raw_api_data"] = None
-                else:
-                    token_data["raw_api_data"] = None
-                
-                tokens_db[contract] = token_data
-                loaded_count += 1
-                
-            except Exception as e:
-                logger.error(f"❌ Ошибка при загрузке токена из строки БД: {e}")
-                continue
+            row_dict = dict(zip(column_names, row))
+            contract = row_dict['contract']
+            
+            # ОРИГИНАЛЬНАЯ логика (БЕЗ ИЗМЕНЕНИЙ)
+            channel_times = json.loads(row_dict['channel_times']) if row_dict['channel_times'] else {}
+            channels = row_dict['channels'].split(', ') if row_dict['channels'] else []
+            
+            first_seen = row_dict['first_seen']
+            if first_seen and len(first_seen) == 8:
+                current_date = datetime.now().strftime("%Y-%m-%d")
+                first_seen = f"{current_date} {first_seen}"
+            elif not first_seen:
+                first_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # ОРИГИНАЛЬНАЯ структура
+            tokens_db[contract] = {
+                'channels': channels,
+                'channel_times': channel_times,
+                'channel_count': row_dict['channel_count'],
+                'first_seen': first_seen,
+                'signal_reached_time': row_dict.get('signal_reached_time'),
+                'time_to_threshold': row_dict.get('time_to_threshold'),
+                'message_sent': bool(row_dict['message_sent']),
+                'message_id': row_dict['message_id'],
+                'emojis': row_dict.get('emojis', '')
+            }
+            
+            # ТОЛЬКО добавляем raw_api_data
+            if 'raw_api_data' in row_dict and row_dict['raw_api_data']:
+                try:
+                    tokens_db[contract]["raw_api_data"] = json.loads(row_dict['raw_api_data'])
+                except:
+                    tokens_db[contract]["raw_api_data"] = None
         
         conn.close()
-        
-        logger.info(f"✅ Загружено {loaded_count} токенов из SQLite БД включая raw_api_data")
+        logger.info(f"✅ Загружено {len(tokens_db)} токенов")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка при загрузке из SQLite БД: {e}")
+        logger.error(f"❌ Ошибка загрузки: {e}")
         tokens_db = {}
         
 TOKEN_LIFETIME_MINUTES = 2880  # через 2 дня токен удаляется из базы
