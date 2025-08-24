@@ -11,7 +11,7 @@ from config import TELEGRAM_TOKEN, logger
 # Импортируем модули проекта
 import token_storage
 from utils import format_tokens_list
-from token_service import check_all_market_caps
+from token_service import check_market_cap
 from handlers.auth_middleware import admin_required, user_required
 from config import CONTROL_ADMIN_IDS
 # Настройка логирования
@@ -265,7 +265,7 @@ async def handle_refresh_list(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         # Обновляем данные о токенах перед получением списка
         # Создаем задачу для проверки Market Cap всех токенов
-        await check_all_market_caps(context)
+        await check_market_cap(context)
         
         # Получаем свежие данные о всех токенах (БЕЗ параметра include_hidden)
         active_tokens = token_storage.get_all_tokens()

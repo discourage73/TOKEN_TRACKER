@@ -234,33 +234,3 @@ async def add_growth_notification(
         logger.error(f"Error sending growth notification for token {token_name}: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-
-# Синхронная обертка для обратной совместимости
-def add_growth_notification_sync(
-    chat_id: int, 
-    token_name: str, 
-    multiplier: int, 
-    market_cap: str,
-    reply_to_message_id: Optional[int] = None
-) -> None:
-    """
-    Синхронная версия add_growth_notification для обратной совместимости.
-    Создает асинхронную задачу для отправки уведомления.
-    """
-    try:
-        # Создаем асинхронную задачу
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Если цикл событий уже запущен, создаем задачу
-            asyncio.create_task(
-                add_growth_notification(chat_id, token_name, multiplier, market_cap, reply_to_message_id)
-            )
-        else:
-            # Если цикла нет, запускаем корутину
-            loop.run_until_complete(
-                add_growth_notification(chat_id, token_name, multiplier, market_cap, reply_to_message_id)
-            )
-    except Exception as e:
-        logger.error(f"Ошибка в синхронной обертке уведомления о росте: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())

@@ -20,7 +20,7 @@ from api_cache import get_token_info_from_api
 from http_client import http_client
 from notifications import add_growth_notification
 from token_monitor_strategy import token_monitor_strategy
-from handlers.auth_middleware import user_required, admin_required
+
 # Настройка логгера
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,6 @@ async def send_or_update_message(
             if token_data:  # token_data - это raw API данные
                 save_raw_api_data_to_tracker_db(query, token_data)
 
-            logger.info(f"Sent new message for token {query} (message_id: {sent_msg.message_id})")
             logger.info(f"Sent new message for token {query} (message_id: {sent_msg.message_id})")
             
         except Exception as e:
@@ -781,8 +780,6 @@ async def send_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
     
     logger.info("=== TOKEN STATISTICS GENERATION COMPLETED ===")
 
-# ЗАМЕНИТЬ СООТВЕТСТВУЮЩУЮ ЧАСТЬ в функции send_weekly_token_stats()
-
 @handle_exception(log_msg="Error sending weekly token statistics")
 async def send_weekly_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -976,6 +973,7 @@ async def send_weekly_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("No tokens in last 7 days to generate weekly statistics")
     
     logger.info("=== WEEKLY TOKEN STATISTICS GENERATION COMPLETED ===")
+
 
 
 # Добавить также необходимые импорты в начало файла, если их нет:

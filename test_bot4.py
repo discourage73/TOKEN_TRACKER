@@ -30,7 +30,7 @@ from utils import format_tokens_list
 # Импортируем функции из token_service
 from token_service import (
     get_token_info,  # Используем основную функцию из token_service 
-    check_all_market_caps, 
+    check_market_cap, 
     set_telegram_context
 )
 
@@ -262,7 +262,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 debug_logger.info("Запуск автоматической проверки Market Cap всех токенов")
                 scheduler.schedule_task(
                     "auto_check", 
-                    check_all_market_caps, 
+                    check_market_cap, 
                     delay=5,
                     priority=TaskPriority.LOW,
                     context=context
@@ -485,8 +485,8 @@ async def handle_refresh_token(update: Update, context: ContextTypes.DEFAULT_TYP
         # Проверяем, нужно ли выполнить автоматическую проверку всех токенов
         if token_storage.check_auto_update_needed():
             debug_logger.info("Запуск автоматической проверки Market Cap всех токенов")
-            from token_service import check_all_market_caps
-            context.application.create_task(check_all_market_caps(context))
+            from token_service import check_market_cap
+            context.application.create_task(check_market_cap(context))
     except Exception as e:
         debug_logger.error(f"Ошибка при обновлении токена {token_query}: {str(e)}")
         debug_logger.error(traceback.format_exc())
