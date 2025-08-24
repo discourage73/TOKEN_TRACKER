@@ -175,7 +175,7 @@ async def add_growth_notification(
         growth_message = (
             f"{fire_emojis}\n"
             f"*{token_name}* *{multiplier}x* from call!\n\n"
-            f"💰 Current Market Cap: {market_cap}"
+            f"MCap: {market_cap}"
         )
         
         # NEW: Get ALL recipients (admin + authorized users)

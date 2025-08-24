@@ -1,4 +1,4 @@
-# Создайте файл task_scheduler.py
+
 import asyncio
 import logging
 import time

@@ -13,7 +13,6 @@ from telegram.ext import ContextTypes
 from telegram.error import TimedOut, NetworkError
 
 # Импортируем модули проекта
-import sqlite3
 import token_storage
 from utils import process_token_data, format_enhanced_message, format_number
 from error_helpers import handle_exception
@@ -100,9 +99,6 @@ async def get_token_info(
     # Получаем и обрабатываем начальные данные
     initial_data = get_initial_data(query, token_info)
     
-    # Проверяем, нужно ли отправлять уведомление о росте
-    growth_notification = check_growth_notification(query, token_info, initial_data)
-    
     # Формируем сообщение
     message = format_enhanced_message(token_info, initial_data)
     
@@ -114,21 +110,6 @@ async def get_token_info(
         await send_or_update_message(
             query, chat_id, message_id, context, message, reply_markup, token_data, token_info, initial_data
         )
-        
-        # Отправляем уведомление о росте, если нужно
-        if growth_notification and context and chat_id:
-            query = growth_notification['query']
-            current_multiplier = growth_notification['current_multiplier']
-            token_info = growth_notification['token_info']
-            ticker = token_info['ticker']
-            market_cap = token_info['market_cap']
-            
-            # Используем уже существующую функцию из notifications.py
-            add_growth_notification(chat_id, ticker, current_multiplier, market_cap)
-            
-            # Обновляем последний алерт
-            token_storage.update_token_field(query, 'last_alert_multiplier', current_multiplier)
-    
     return token_info
 
 @handle_exception(log_msg="Ошибка при получении данных API")
@@ -236,57 +217,6 @@ def get_initial_data(query: str, token_info: Dict[str, Any]) -> Dict[str, Any]:
     
     return initial_data
 
-@handle_exception(log_msg="Ошибка при проверке роста")
-def check_growth_notification(
-    query: str,
-    token_info: Dict[str, Any], 
-    initial_data: Optional[Dict[str, Any]]
-) -> Optional[Dict[str, Any]]:
-    """Проверяет, нужно ли отправить уведомление о росте."""
-    if not initial_data or 'raw_market_cap' not in initial_data or not initial_data['raw_market_cap']:
-        return None
-    
-    if 'raw_market_cap' not in token_info or not token_info['raw_market_cap']:
-        return None
-    
-    initial_mcap = initial_data['raw_market_cap']
-    current_mcap = token_info['raw_market_cap']
-    
-    # Вычисляем множитель
-    if initial_mcap <= 0:
-        return None
-    
-    multiplier = current_mcap / initial_mcap
-    current_multiplier = int(multiplier)
-    
-    # Если множитель < 2, не отправляем уведомление
-    if current_multiplier < 2:
-        return None
-    
-    # Проверяем, был ли уже отправлен алерт для данного множителя
-    stored_data = token_storage.get_token_data(query)
-    if not stored_data:
-        return None
-    
-    last_alert_multiplier = stored_data.get('last_alert_multiplier', 1)
-    
-    # Если текущий множитель <= предыдущий алерт, не отправляем уведомление
-    if current_multiplier <= last_alert_multiplier:
-        return None
-    
-    # Проверяем стратегию мониторинга
-    growth_percent = (multiplier - 1) * 100
-    
-    if not token_monitor_strategy.should_notify_growth(query, growth_percent):
-        logger.info(f"Уведомление о росте токена {query} не отправлено: не соответствует стратегии")
-        return None
-        
-    return {
-        'query': query,
-        'current_multiplier': current_multiplier,
-        'token_info': token_info
-    }
-
 @handle_exception(log_msg="Error sending/updating message")
 async def send_or_update_message(
     query: str,
@@ -325,11 +255,7 @@ async def send_or_update_message(
             }
             
             token_storage.store_token_data(query, token_data_to_store)
-            if token_data:
-                save_raw_api_data_to_tracker_db(query, token_data)
-                logger.info(f"💾 Raw API данные сохранены в обе БД для токена {query}")
-
-            logger.info(f"Updated message for token {query} (message_id: {message_id})")
+            
             
         except Exception as e:
             if "Message is not modified" not in str(e):
@@ -387,50 +313,65 @@ async def send_or_update_message(
             }
             
             token_storage.store_token_data(query, token_data_to_store)
+            if token_data:  # token_data - это raw API данные
+                save_raw_api_data_to_tracker_db(query, token_data)
+
+            logger.info(f"Sent new message for token {query} (message_id: {sent_msg.message_id})")
             logger.info(f"Sent new message for token {query} (message_id: {sent_msg.message_id})")
             
         except Exception as e:
             logger.error(f"Error sending new message: {e}")
 
-@handle_exception(log_msg="Ошибка при отправке уведомления о росте")
-async def send_growth_notification_handler(
-    growth_data: Dict[str, Any],
-    chat_id: int,
-    message_id: int,
-    context: ContextTypes.DEFAULT_TYPE
-) -> None:
+def save_raw_api_data_to_tracker_db(contract_address: str, raw_api_data: dict):
     """
-    Обработчик отправки уведомления о росте токена.
-    После отправки уведомления сразу фиксирует новый ATH, если он выше предыдущего.
+    Простая функция для записи raw API данных в tracker БД.
     """
-    # Извлекаем данные
-    query              = growth_data['query']
-    current_multiplier = growth_data['current_multiplier']
-    token_info         = growth_data['token_info']
-    ticker             = token_info['ticker']
-    market_cap_str     = token_info['market_cap']
-    raw_mcap           = token_info['raw_market_cap']  # числовое значение
-
-    # 1. Отправляем уведомление пользователю
-    await add_growth_notification(
-        chat_id=chat_id,
-        ticker=ticker,
-        multiplier=current_multiplier,
-        market_cap=market_cap_str,
-        reply_to_message_id=message_id
-    )
-
-    # 2. Обновляем в БД последний отправленный множитель
-    token_storage.update_token_field(
-        query=query,
-        field_name='last_alert_multiplier',
-        value=current_multiplier
-    )
-
-    # 3. Фиксируем новый ATH, если он выше предыдущего
-    #    Внутри update_token_ath есть сравнение и условие перезаписи
-    token_storage.update_token_ath(query=query, new_mcap=raw_mcap)
-    logger.info(f"ATH для токена {query} обновлён до {raw_mcap}")
+    try:
+        import json
+        import sqlite3
+        
+        logger.info(f"🔍 ОТЛАДКА: Пытаемся записать API данные для {contract_address}")
+        logger.info(f"🔍 ОТЛАДКА: Размер API данных: {len(str(raw_api_data))} символов")
+        
+        # Подключаемся к tracker БД
+        conn = sqlite3.connect("tokens_tracker_database.db")
+        cursor = conn.cursor()
+        
+        # Сначала проверяем, есть ли токен в tracker БД
+        cursor.execute('SELECT contract FROM tokens WHERE contract = ?', (contract_address,))
+        exists = cursor.fetchone()
+        
+        if not exists:
+            logger.error(f"❌ ОТЛАДКА: Токен {contract_address} НЕ НАЙДЕН в tracker БД!")
+            conn.close()
+            return
+        
+        logger.info(f"✅ ОТЛАДКА: Токен {contract_address} найден в tracker БД")
+        
+        # Преобразуем в JSON
+        raw_api_json = json.dumps(raw_api_data, ensure_ascii=False)
+        
+        # Обновляем запись
+        cursor.execute('''
+        UPDATE tokens 
+        SET raw_api_data = ?
+        WHERE contract = ?
+        ''', (raw_api_json, contract_address))
+        
+        logger.info(f"🔍 ОТЛАДКА: cursor.rowcount = {cursor.rowcount}")
+        
+        conn.commit()
+        conn.close()
+        
+        if cursor.rowcount > 0:
+            logger.info(f"✅ Raw API данные записаны в tracker БД для {contract_address}")
+        else:
+            logger.warning(f"⚠️ Токен {contract_address} не найден в tracker БД")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка записи в tracker БД: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 @handle_exception(log_msg="Ошибка при обработке адреса токена")
 async def process_token_address(address: str, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -654,84 +595,6 @@ async def monitor_token_market_caps(context: ContextTypes.DEFAULT_TYPE) -> None:
         import traceback
         logger.error(traceback.format_exc())
 
-@handle_exception(log_msg="Ошибка при проверке всех маркет капов")
-async def check_all_market_caps(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Проверяет Market Cap всех отслеживаемых токенов.
-    Не отправляет регулярных сообщений, только уведомления о росте.
-    """
-    logger.info("Начало автоматической проверки Market Cap всех токенов")
-    
-    # Обновляем время последней автоматической проверки
-    token_storage.update_last_auto_check_time()
-    
-    # Сохраняем контекст для использования в уведомлениях
-    set_telegram_context(context)
-       
-    # Получаем все отслеживаемые токены
-    all_tokens = token_storage.get_all_tokens()
-    
-    # Используем стратегию для выбора токенов, которые нужно проверить
-    tokens_to_check = token_monitor_strategy.get_tokens_for_check(all_tokens)
-    
-    logger.info(f"Запланирована проверка {len(tokens_to_check)} из {len(all_tokens)} токенов")
-    
-    # Обрабатываем токены в батчах по 5 штук
-    batch_size = 5
-    for i in range(0, len(tokens_to_check), batch_size):
-        batch = tokens_to_check[i:i+batch_size]
-        
-        # Создаем задачи для каждого токена в батче
-        tasks = []
-        for query in batch:
-            token_data = all_tokens[query]
-            chat_id = token_data.get('chat_id')
-            message_id = token_data.get('message_id')
-            
-            if not chat_id or not message_id:
-                continue
-                
-            task = asyncio.create_task(
-                check_market_cap(query, chat_id, message_id, context, check_growth=True)
-            )
-            tasks.append((query, task))
-        
-        # Ждем завершения всех задач в батче
-        for query, task in tasks:
-            try:
-                result = await task
-                
-                if result and result.get('send_notification', False):
-                    # Отправляем уведомление о росте как ответ на информационное сообщение
-                    token_data = all_tokens[query]
-                    current_multiplier = result.get('current_multiplier', 1)
-                    
-                    # Получаем данные для уведомления
-                    token_info = token_data.get('token_info', {})
-                    ticker = token_info.get('ticker', 'Неизвестно')
-                    market_cap = result.get('market_cap', 'Неизвестно')
-                    chat_id = token_data.get('chat_id')
-                    message_id = token_data.get('message_id')
-                    
-                    # Проверяем, был ли уже отправлен алерт для данного множителя
-                    last_alert_multiplier = token_data.get('last_alert_multiplier', 1)
-                    
-                    if current_multiplier > last_alert_multiplier and message_id:
-                        # Отправляем уведомление о росте как ответ на информационное сообщение
-                        await add_growth_notification(chat_id, ticker, current_multiplier, market_cap, message_id, query)
-                        
-                        # Обновляем последний алерт
-                        token_storage.update_token_field(query, 'last_alert_multiplier', current_multiplier)
-                        logger.info(f"Отправлено уведомление о росте токена {ticker} до x{current_multiplier}")
-                
-            except Exception as e:
-                logger.error(f"Ошибка при автоматической проверке токена {query}: {e}")
-        
-        # Небольшая пауза между батчами
-        await asyncio.sleep(1)
-        
-    logger.info("Автоматическая проверка Market Cap всех токенов завершена")
-
 @handle_exception(log_msg="Error sending token statistics")
 async def send_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
     """
@@ -917,6 +780,208 @@ async def send_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("No tokens in last 12 hours to generate statistics")
     
     logger.info("=== TOKEN STATISTICS GENERATION COMPLETED ===")
+
+# ЗАМЕНИТЬ СООТВЕТСТВУЮЩУЮ ЧАСТЬ в функции send_weekly_token_stats()
+
+@handle_exception(log_msg="Error sending weekly token statistics")
+async def send_weekly_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Sends token statistics for the last 7 days to ALL authorized users.
+    This function runs on schedule.
+    """
+    logger.info("=== STARTING WEEKLY TOKEN STATISTICS GENERATION ===")
+    
+    # Get all tokens for analytics
+    all_tokens = token_storage.get_all_tokens_for_analytics()
+    logger.info(f"Loaded tokens for weekly analysis: {len(all_tokens)}")
+    
+    if not all_tokens:
+        logger.info("No tokens to generate weekly statistics")
+        return
+    
+    # Current time
+    current_time = time.time()
+    logger.info(f"Current time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Time 7 days ago (7 * 24 * 60 * 60 seconds)
+    time_7d_ago = current_time - (7 * 24 * 60 * 60)
+    logger.info(f"Time 7 days ago: {datetime.datetime.fromtimestamp(time_7d_ago).strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # Weekly statistics counters (ОБНОВЛЕННЫЕ КАТЕГОРИИ)
+    total_tokens = 0
+    tokens_1_5x = 0    # 1.5x-2x
+    tokens_2x = 0      # 2x-3x
+    tokens_3x = 0      # 3x-4x
+    tokens_4x = 0      # 4x-5x
+    tokens_5x = 0      # 5x-10x
+    tokens_10x = 0     # >10x
+    
+    # List of tokens for detailed logging
+    analyzed_tokens = []
+    
+    # Check each token
+    for query, data in all_tokens.items():
+        # Check if token was added within last 7 days
+        added_time = data.get('added_time', 0)
+        
+        if not added_time:
+            logger.info(f"Weekly: Token {query} has no add time, skipping")
+            continue
+            
+        # Log token add time
+        token_added_time = datetime.datetime.fromtimestamp(added_time).strftime('%Y-%m-%d %H:%M:%S')
+        logger.info(f"Weekly: Token {query} added: {token_added_time}")
+        
+        if added_time < time_7d_ago:
+            logger.info(f"Weekly: Token {query} added more than 7 days ago, skipping")
+            continue
+            
+        # Get initial market cap
+        initial_mcap = 0
+        if 'initial_data' in data and 'raw_market_cap' in data['initial_data']:
+            initial_mcap = data['initial_data'].get('raw_market_cap', 0)
+        
+        # Use ATH market cap instead of current
+        ath_market_cap = data.get('ath_market_cap', 0)
+        
+        # If no ATH data or initial data, skip
+        if not initial_mcap or initial_mcap <= 0:
+            logger.info(f"Weekly: Token {query} has no valid initial market cap, skipping")
+            continue
+            
+        if not ath_market_cap or ath_market_cap <= 0:
+            logger.info(f"Weekly: Token {query} has no ATH market cap data, skipping")
+            continue
+        
+        # Calculate multiplier using ATH
+        multiplier = ath_market_cap / initial_mcap
+        
+        # Add to total count
+        total_tokens += 1
+        
+        # ОБНОВЛЕННЫЕ КАТЕГОРИИ РОСТА
+        if multiplier >= 10:
+            tokens_10x += 1
+            category = ">10x"
+        elif multiplier >= 5:
+            tokens_5x += 1
+            category = "5x-10x"
+        elif multiplier >= 4:
+            tokens_4x += 1
+            category = "4x-5x"
+        elif multiplier >= 3:
+            tokens_3x += 1
+            category = "3x-4x"
+        elif multiplier >= 2:
+            tokens_2x += 1
+            category = "2x-3x"
+        elif multiplier >= 1.5:
+            tokens_1_5x += 1
+            category = "1.5x-2x"
+        else:
+            category = "<1.5x"
+        
+        analyzed_tokens.append({
+            'query': query,
+            'multiplier': multiplier,
+            'category': category,
+            'initial_mcap': initial_mcap,
+            'ath_mcap': ath_market_cap
+        })
+        
+        logger.info(f"Weekly: Token {query}: {multiplier:.2f}x ({category})")
+    
+    if total_tokens > 0:
+        # Calculate success rates for weekly stats (все токены от 1.5x+)
+        successful_tokens = tokens_1_5x + tokens_2x + tokens_3x + tokens_4x + tokens_5x + tokens_10x
+        hitrate_percent = (successful_tokens / total_tokens) * 100 if total_tokens > 0 else 0
+        
+        # Different symbol system for weekly (пороги для 1.5x+)
+        hitrate_symbol = "🔴"  # <40%
+        if hitrate_percent >= 80:
+            hitrate_symbol = "🟣"  # >=80%
+        elif hitrate_percent >= 60:
+            hitrate_symbol = "🟢"  # >=60%
+        elif hitrate_percent >= 40:
+            hitrate_symbol = "🟡"  # >=40%
+        
+        # ОБНОВЛЕННОЕ СООБЩЕНИЕ С НОВЫМИ КАТЕГОРИЯМИ
+        message = (
+            f"📊 Weekly Token Stats (7 days):\n"
+            f"> Total tokens: {total_tokens}\n"
+            f"├ 1.5x-2x: {tokens_1_5x}\n"
+            f"├ 2x-3x: {tokens_2x}\n"
+            f"├ 3x-4x: {tokens_3x}\n"
+            f"├ 4x-5x: {tokens_4x}\n"
+            f"├ 5x-10x: {tokens_5x}\n"
+            f"└ >10x: {tokens_10x}\n\n"
+            f"Weekly Hitrate: {hitrate_percent:.1f}% {hitrate_symbol} (1.5x+)"
+        )
+        
+        # NEW: Get ALL recipients (admin + active users) - такой же код как в 12h версии
+        from handlers.auth_middleware import get_user_db
+        from config import CONTROL_ADMIN_IDS
+        user_db = get_user_db()
+        all_users = user_db.get_all_users()
+        active_users = [user for user in all_users if user['is_active']]
+        
+        # Create list of all recipients
+        recipients = []
+        
+        # Add admin (always receives notifications)
+        for admin_id in CONTROL_ADMIN_IDS:
+            recipients.append({'user_id': admin_id, 'username': 'admin'})
+        
+        # Add active users (excluding admin duplicate)
+        for user in active_users:
+            if user['user_id'] not in CONTROL_ADMIN_IDS:  # Avoid duplicate
+                recipients.append(user)
+        
+        if not recipients:
+            logger.warning("No recipients to send weekly statistics")
+            return
+        
+        logger.info(f"Sending weekly statistics to {len(recipients)} recipients (admin + active users)")
+        
+        # Send message to ALL recipients
+        success_count = 0
+        for user in recipients:
+            try:
+                logger.info(f"Sending weekly statistics to chat {user['user_id']}...")
+                
+                # Add retry handling for sending
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        await context.bot.send_message(
+                            chat_id=user['user_id'],
+                            text=message
+                        )
+                        logger.info(f"Weekly token statistics successfully sent to chat {user['user_id']}")
+                        success_count += 1
+                        break
+                    except (TimedOut, NetworkError) as e:
+                        if attempt < max_retries - 1:
+                            logger.warning(f"Timeout sending weekly statistics to chat {user['user_id']} (attempt {attempt+1}/{max_retries}): {e}")
+                            await asyncio.sleep(2)
+                        else:
+                            logger.error(f"Failed to send weekly statistics to chat {user['user_id']} after {max_retries} attempts: {e}")
+            except Exception as e:
+                logger.error(f"Error sending weekly statistics to chat {user['user_id']}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"Weekly statistics successfully sent to {success_count} out of {len(recipients)} chats")
+    else:
+        logger.info("No tokens in last 7 days to generate weekly statistics")
+    
+    logger.info("=== WEEKLY TOKEN STATISTICS GENERATION COMPLETED ===")
+
+
+# Добавить также необходимые импорты в начало файла, если их нет:
+import datetime
+from telegram.error import TimedOut, NetworkError
+
 # Получает данные о сигналах из SQLite базы данных tracker'а.
 def get_signals_data(contract_address: str) -> Optional[Dict[str, Any]]:
     """
@@ -1284,38 +1349,6 @@ async def generate_analytics_excel(context: ContextTypes.DEFAULT_TYPE, chat_id: 
             chat_id=chat_id,
             text="Произошла ошибка при генерации полной аналитики. Пожалуйста, попробуйте позже."
         )
-
-def save_raw_api_data_to_tracker_db(contract_address: str, raw_api_data: dict):
-    """
-    Простая функция для записи raw API данных в tracker БД.
-    """
-    try:
-        import json
-        
-        # Подключаемся к tracker БД
-        conn = sqlite3.connect("tokens_tracker_database.db")
-        cursor = conn.cursor()
-        
-        # Преобразуем в JSON
-        raw_api_json = json.dumps(raw_api_data, ensure_ascii=False)
-        
-        # Обновляем запись
-        cursor.execute('''
-        UPDATE tokens 
-        SET raw_api_data = ?
-        WHERE contract = ?
-        ''', (raw_api_json, contract_address))
-        
-        conn.commit()
-        conn.close()
-        
-        if cursor.rowcount > 0:
-            logger.info(f"✅ Raw API данные записаны в tracker БД для {contract_address}")
-        else:
-            logger.warning(f"⚠️ Токен {contract_address} не найден в tracker БД")
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка записи в tracker БД: {e}")
 
 @handle_exception(log_msg="Ошибка при запуске системы мониторинга")
 async def start_token_monitoring_system(telegram_context):

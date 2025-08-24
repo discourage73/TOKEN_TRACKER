@@ -37,6 +37,7 @@ from token_service import (
 # Обновляем импорты из test_bot_commands - ТОЛЬКО СУЩЕСТВУЮЩИЕ ФУНКЦИИ
 from test_bot_commands import (
     stats_command,
+    weekly_stats_command, 
     list_tokens,
     clear_tokens,
     analytics_command,
@@ -523,6 +524,7 @@ def create_bot_application():
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("list", list_tokens))
     application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("weekly_stats", weekly_stats_command))
     application.add_handler(CommandHandler("analytics", analytics_command))
     application.add_handler(CommandHandler("clear", clear_tokens))
     application.add_handler(CommandHandler("adduser", add_user_command))     

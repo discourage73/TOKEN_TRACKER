@@ -443,6 +443,45 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
         except Exception:
             pass
+
+# ДОБАВИТЬ ЭТУ КОМАНДУ В test_bot_commands.py после stats_command
+
+@admin_required
+async def weekly_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Отображает статистику по токенам за последние 7 дней."""
+    try:
+        debug_logger.info("Запрошена недельная статистика по токенам")
+        
+        # Отправляем сообщение о начале формирования статистики
+        wait_message = await update.message.reply_text(
+            "📊 Формирую недельную статистику по токенам за последние 7 дней...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Импортируем функцию для отправки недельной статистики
+        from token_service import send_weekly_token_stats
+        
+        # Вызываем функцию для отправки недельной статистики
+        await send_weekly_token_stats(context)
+        
+        # Удаляем сообщение об ожидании
+        try:
+            await wait_message.delete()
+        except Exception as e:
+            debug_logger.error(f"Ошибка при удалении сообщения об ожидании: {e}")
+        
+        debug_logger.info("Недельная статистика по токенам успешно отправлена")
+        
+    except Exception as e:
+        debug_logger.error(f"Ошибка при формировании недельной статистики: {str(e)}")
+        debug_logger.error(traceback.format_exc())
+        try:
+            await update.message.reply_text(
+                "Произошла ошибка при формировании недельной статистики. Пожалуйста, попробуйте позже."
+            )
+        except Exception:
+            pass
+
 @admin_required
 async def analytics_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Отображает полную аналитику по всем токенам (включая старые)."""
@@ -768,7 +807,8 @@ async def setup_bot_commands(application) -> None:
             BotCommand("list", "list of tracked tokens"),
             BotCommand("clear", "delete/manage tokens"),
             BotCommand("analytics", "Token analytics"),
-            BotCommand("stats", "stats (12 h)")
+            BotCommand("stats", "stats (12 h)"),
+            BotCommand("weekly_stats", "weekly stats (7 days)")
         ]
         
         await application.bot.set_my_commands(commands)
@@ -789,7 +829,8 @@ def setup_commands_direct(token):
             {"command": "help", "description": "show help"},
             {"command": "list", "description": "list of tracked tokens"},
             {"command": "clear", "description": "delete/manage tokens"},
-            {"command": "stats", "description": "stats (12 h)"}
+            {"command": "stats", "description": "stats (12 h)"},
+            {"command": "weekly_stats", "description": "weekly stats (7 days)"}
         ]
         
         url = f"https://api.telegram.org/bot{token}/setMyCommands"
@@ -803,6 +844,43 @@ def setup_commands_direct(token):
         debug_logger.error(f"Ошибка при настройке команд бота через API: {str(e)}")
         debug_logger.error(traceback.format_exc())
 
+# Добавить эту команду в test_bot_commands.py
+
+@admin_required
+async def weekly_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Отображает статистику по токенам за последние 7 дней."""
+    try:
+        debug_logger.info("Запрошена недельная статистика по токенам")
+        
+        # Отправляем сообщение о начале формирования статистики
+        wait_message = await update.message.reply_text(
+            "📊 Формирую недельную статистику по токенам за последние 7 дней...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        # Импортируем функцию для отправки недельной статистики
+        from token_service import send_weekly_token_stats
+        
+        # Вызываем функцию для отправки недельной статистики
+        await send_weekly_token_stats(context)
+        
+        # Удаляем сообщение об ожидании
+        try:
+            await wait_message.delete()
+        except Exception as e:
+            debug_logger.error(f"Ошибка при удалении сообщения об ожидании: {e}")
+        
+        debug_logger.info("Недельная статистика по токенам успешно отправлена")
+        
+    except Exception as e:
+        debug_logger.error(f"Ошибка при формировании недельной статистики: {str(e)}")
+        debug_logger.error(traceback.format_exc())
+        try:
+            await update.message.reply_text(
+                "Произошла ошибка при формировании недельной статистики. Пожалуйста, попробуйте позже."
+            )
+        except Exception:
+            pass
 
 @admin_required
 async def add_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

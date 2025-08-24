@@ -52,7 +52,7 @@ from config import TELEGRAM_TOKEN, DEXSCREENER_API_URL, API_ID, API_HASH, TARGET
 import token_storage
 
 # Минимальное количество каналов для отправки сигнала в RadarDexBot
-MIN_SIGNALS = 20  # Токен должен появиться минимум в 20 каналах
+MIN_SIGNALS = 15  # Токен должен появиться минимум в 20 каналах
 
 # Словарь соответствия тегов и эмодзи
 TAG_EMOJI_MAP = {
@@ -226,7 +226,7 @@ def init_tracker_db():
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
-        # ОРИГИНАЛЬНАЯ таблица (БЕЗ ИЗМЕНЕНИЙ)
+        # СОЗДАЕМ таблицу СРАЗУ с raw_api_data
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS tokens (
             contract TEXT PRIMARY KEY,
@@ -239,26 +239,27 @@ def init_tracker_db():
             emojis TEXT DEFAULT '',
             updated_at TEXT,
             message_sent INTEGER DEFAULT 0,
-            message_id INTEGER DEFAULT 0
+            message_id INTEGER DEFAULT 0,
+            raw_api_data TEXT DEFAULT NULL
         )
         ''')
         
-        # ТОЛЬКО добавляем новый столбец (если его нет)
+        # Для существующих БД добавляем столбец (если его нет)
         try:
             cursor.execute('ALTER TABLE tokens ADD COLUMN raw_api_data TEXT DEFAULT NULL')
-            logger.info("✅ Добавлен столбец raw_api_data")
+            logger.info("✅ Добавлен столбец raw_api_data в существующую таблицу")
         except sqlite3.OperationalError:
-            # Столбец уже существует
+            # Столбец уже существует или таблица только что создана
             pass
         
-        # Остальные индексы БЕЗ ИЗМЕНЕНИЙ
+        # Остальные индексы
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_channel_count ON tokens(channel_count)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_first_seen ON tokens(first_seen)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_message_sent ON tokens(message_sent)')
         
         conn.commit()
         conn.close()
-        logger.info("✅ Таблица tracker инициализирована")
+        logger.info("✅ Таблица tracker инициализирована с raw_api_data")
         
     except Exception as e:
         logger.error(f"❌ Ошибка инициализации: {e}")
@@ -303,7 +304,6 @@ def save_tokens_to_db():
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения: {e}")
 
-# В функции load_tokens_from_db() ТОЛЬКО добавить загрузку raw_api_data:
 def load_tokens_from_db():
     """ОРИГИНАЛЬНАЯ функция + только raw_api_data"""
     global tokens_db
@@ -358,7 +358,7 @@ def load_tokens_from_db():
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки: {e}")
         tokens_db = {}
-        
+
 TOKEN_LIFETIME_MINUTES = 2880  # через 2 дня токен удаляется из базы
 
 def cleanup_old_tokens():

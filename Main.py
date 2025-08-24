@@ -135,15 +135,22 @@ async def run_solana_tracker():
     global tracker_task
     
     try:
-        # Переопределяем стандартный вывод для solana_contract_tracker
+        # Сохраняем оригинальные дескрипторы
         original_stdout = sys.stdout
         original_stderr = sys.stderr
+        
         solana_log_file = f'logs/solana_output_{timestamp}.log'
         
-        with open(solana_log_file, 'a', encoding='utf-8') as solana_stdout:
+        # Открываем файл БЕЗ контекстного менеджера
+        solana_log_handle = None
+        
+        try:
+            # Открываем файл
+            solana_log_handle = open(solana_log_file, 'a', encoding='utf-8')
+            
             # Перенаправляем stdout и stderr
-            sys.stdout = solana_stdout
-            sys.stderr = solana_stdout
+            sys.stdout = solana_log_handle
+            sys.stderr = solana_log_handle
             
             # Модифицируем переменные окружения для контроля логирования
             os.environ["LOG_LEVEL"] = LOG_LEVEL
@@ -151,12 +158,11 @@ async def run_solana_tracker():
             # Импортируем функцию main из solana_contract_tracker
             from solana_contract_tracker import main
             
-            logger.info("Запуск отслеживания контрактов Solana...")
-            
-            # Возвращаем стандартный вывод основному процессу
+            # Возвращаем стандартный вывод основному процессу СРАЗУ после импорта
             sys.stdout = original_stdout
             sys.stderr = original_stderr
             
+            logger.info("Запуск отслеживания контрактов Solana...")
             print("[INFO] Отслеживание контрактов Solana запущено")
             
             # Создаем задачу для отслеживания
@@ -173,6 +179,19 @@ async def run_solana_tracker():
                     await tracker_task
                 except asyncio.CancelledError:
                     logger.info("Трекер остановлен")
+                    
+        finally:
+            # ОБЯЗАТЕЛЬНО восстанавливаем дескрипторы
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            
+            # Закрываем файл в блоке finally
+            if solana_log_handle:
+                try:
+                    solana_log_handle.flush()  # Сбрасываем буфер
+                    solana_log_handle.close()
+                except Exception as close_error:
+                    logger.warning(f"Ошибка при закрытии файла лога: {close_error}")
             
     except Exception as e:
         logger.error(f"Ошибка при запуске трекера контрактов: {e}")
@@ -180,25 +199,31 @@ async def run_solana_tracker():
         import traceback
         logger.error(traceback.format_exc())
         
-        # Возвращаем стандартный вывод, если произошла ошибка
-        if 'original_stdout' in locals() and sys.stdout != original_stdout:
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
+        # Убеждаемся, что стандартный вывод восстановлен
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
 
 async def run_message_forwarder():
     """Функция для запуска сервиса пересылки сообщений."""
     global forwarder_task
     
     try:
-        # Переопределяем стандартный вывод для message_forwarder
+        # Сохраняем оригинальные дескрипторы
         original_stdout = sys.stdout
         original_stderr = sys.stderr
+        
         forwarder_log_file = f'logs/forwarder_output_{timestamp}.log'
         
-        with open(forwarder_log_file, 'a', encoding='utf-8') as forwarder_stdout:
+        # Открываем файл БЕЗ контекстного менеджера
+        forwarder_log_handle = None
+        
+        try:
+            # Открываем файл
+            forwarder_log_handle = open(forwarder_log_file, 'a', encoding='utf-8')
+            
             # Перенаправляем stdout и stderr
-            sys.stdout = forwarder_stdout
-            sys.stderr = forwarder_stdout
+            sys.stdout = forwarder_log_handle
+            sys.stderr = forwarder_log_handle
             
             # Модифицируем переменные окружения для контроля логирования
             os.environ["LOG_LEVEL"] = LOG_LEVEL
@@ -206,12 +231,11 @@ async def run_message_forwarder():
             # Импортируем функцию start_forwarding из message_forwarder
             from message_forwarder import start_forwarding
             
-            logger.info("Запуск сервиса пересылки сообщений...")
-            
-            # Возвращаем стандартный вывод основному процессу
+            # Возвращаем стандартный вывод основному процессу СРАЗУ после импорта
             sys.stdout = original_stdout
             sys.stderr = original_stderr
             
+            logger.info("Запуск сервиса пересылки сообщений...")
             print("[INFO] Сервис пересылки сообщений запущен")
             
             # Создаем задачу для пересылки сообщений
@@ -231,6 +255,19 @@ async def run_message_forwarder():
                     await forwarder_task
                 except asyncio.CancelledError:
                     logger.info("Сервис пересылки сообщений остановлен")
+                    
+        finally:
+            # ОБЯЗАТЕЛЬНО восстанавливаем дескрипторы
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+            
+            # Закрываем файл в блоке finally
+            if forwarder_log_handle:
+                try:
+                    forwarder_log_handle.flush()  # Сбрасываем буфер
+                    forwarder_log_handle.close()
+                except Exception as close_error:
+                    logger.warning(f"Ошибка при закрытии файла лога форвардера: {close_error}")
             
     except Exception as e:
         logger.error(f"Ошибка при запуске сервиса пересылки сообщений: {e}")
@@ -238,10 +275,9 @@ async def run_message_forwarder():
         import traceback
         logger.error(traceback.format_exc())
         
-        # Возвращаем стандартный вывод, если произошла ошибка
-        if 'original_stdout' in locals() and sys.stdout != original_stdout:
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
+        # Убеждаемся, что стандартный вывод восстановлен
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
 
 def signal_handler(sig, frame):
     """Обработчик сигнала прерывания."""
