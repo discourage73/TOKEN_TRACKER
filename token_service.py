@@ -5,9 +5,8 @@ import asyncio
 import random
 import datetime
 from typing import Dict, Any, Optional, Union, List, Tuple
-import functools
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 from telegram.error import TimedOut, NetworkError
@@ -87,7 +86,7 @@ async def get_token_info(
     
     # Если нужны свежие данные, запрашиваем их из API
     if need_fresh_data:
-        api_data = await fetch_token_api_data(query)
+        api_data = get_token_info_from_api(query)
         if not api_data:
             return await handle_api_error(query, chat_id, message_id, context)
         
@@ -111,21 +110,6 @@ async def get_token_info(
             query, chat_id, message_id, context, message, reply_markup, token_data, token_info, initial_data
         )
     return token_info
-
-@handle_exception(log_msg="Ошибка при получении данных API")
-async def fetch_token_api_data(query: str) -> Optional[Dict[str, Any]]:
-    """Получает данные о токене из API с использованием кэширования."""
-    from config import DEXSCREENER_API_URL
-    
-    # Используем кэшированную функцию для получения данных
-    api_data = get_token_info_from_api(query)
-    
-    if api_data:
-        logger.info(f"Получены данные из API для {query}")
-        return api_data
-    
-    logger.warning(f"Не удалось получить данные из API для {query}")
-    return None
 
 @handle_exception(log_msg="Ошибка при обработке данных API")
 def process_api_data(api_data: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
@@ -322,53 +306,65 @@ async def send_or_update_message(
             logger.error(f"Error sending new message: {e}")
 
 def save_raw_api_data_to_tracker_db(contract_address: str, raw_api_data: dict):
-    """
-    Простая функция для записи raw API данных в tracker БД.
-    """
+    """ДИАГНОСТИЧЕСКАЯ функция - покажет ВСЕ"""
+    import json
+    import sqlite3
+    
+    logger.info(f"🔥 ДИАГНОСТИКА: Начинаем для {contract_address}")
+    
     try:
-        import json
-        import sqlite3
-        
-        logger.info(f"🔍 ОТЛАДКА: Пытаемся записать API данные для {contract_address}")
-        logger.info(f"🔍 ОТЛАДКА: Размер API данных: {len(str(raw_api_data))} символов")
-        
-        # Подключаемся к tracker БД
+        # Подключение
         conn = sqlite3.connect("tokens_tracker_database.db")
         cursor = conn.cursor()
         
-        # Сначала проверяем, есть ли токен в tracker БД
-        cursor.execute('SELECT contract FROM tokens WHERE contract = ?', (contract_address,))
-        exists = cursor.fetchone()
+        # 1. ПРОВЕРЯЕМ что токен есть в БД
+        cursor.execute('SELECT contract, raw_api_data FROM tokens WHERE contract = ?', (contract_address,))
+        before = cursor.fetchone()
         
-        if not exists:
-            logger.error(f"❌ ОТЛАДКА: Токен {contract_address} НЕ НАЙДЕН в tracker БД!")
+        if not before:
+            logger.error(f"❌ ТОКЕН {contract_address} НЕ НАЙДЕН В БД!")
             conn.close()
             return
+            
+        logger.info(f"✅ Токен найден. ДО записи: raw_api_data = {before[1][:50] if before[1] else 'NULL'}...")
         
-        logger.info(f"✅ ОТЛАДКА: Токен {contract_address} найден в tracker БД")
+        # 2. ЗАПИСЫВАЕМ данные
+        raw_json = json.dumps(raw_api_data, ensure_ascii=False)
+        cursor.execute('UPDATE tokens SET raw_api_data = ? WHERE contract = ?', (raw_json, contract_address))
         
-        # Преобразуем в JSON
-        raw_api_json = json.dumps(raw_api_data, ensure_ascii=False)
+        logger.info(f"📝 UPDATE выполнен: rowcount = {cursor.rowcount}")
         
-        # Обновляем запись
-        cursor.execute('''
-        UPDATE tokens 
-        SET raw_api_data = ?
-        WHERE contract = ?
-        ''', (raw_api_json, contract_address))
+        # 3. ПРОВЕРЯЕМ ДО commit
+        cursor.execute('SELECT raw_api_data FROM tokens WHERE contract = ?', (contract_address,))
+        before_commit = cursor.fetchone()
+        logger.info(f"🔍 ДО COMMIT: {before_commit[0][:50] if before_commit and before_commit[0] else 'NULL'}...")
         
-        logger.info(f"🔍 ОТЛАДКА: cursor.rowcount = {cursor.rowcount}")
-        
+        # 4. COMMIT
         conn.commit()
+        logger.info("💾 COMMIT выполнен")
+        
+        # 5. ПРОВЕРЯЕМ ПОСЛЕ commit
+        cursor.execute('SELECT raw_api_data FROM tokens WHERE contract = ?', (contract_address,))
+        after_commit = cursor.fetchone()
+        logger.info(f"🔍 ПОСЛЕ COMMIT: {after_commit[0][:50] if after_commit and after_commit[0] else 'NULL'}...")
+        
         conn.close()
         
-        if cursor.rowcount > 0:
-            logger.info(f"✅ Raw API данные записаны в tracker БД для {contract_address}")
+        # 6. ОТКРЫВАЕМ БД ЗАНОВО и проверяем
+        conn2 = sqlite3.connect("tokens_tracker_database.db")
+        cursor2 = conn2.cursor()
+        cursor2.execute('SELECT raw_api_data FROM tokens WHERE contract = ?', (contract_address,))
+        final_check = cursor2.fetchone()
+        
+        if final_check and final_check[0]:
+            logger.info(f"🎉 ФИНАЛЬНАЯ ПРОВЕРКА: ДАННЫЕ ЕСТЬ! Размер: {len(final_check[0])}")
         else:
-            logger.warning(f"⚠️ Токен {contract_address} не найден в tracker БД")
+            logger.error(f"❌ ФИНАЛЬНАЯ ПРОВЕРКА: ДАННЫЕ ПРОПАЛИ!")
             
+        conn2.close()
+        
     except Exception as e:
-        logger.error(f"❌ Ошибка записи в tracker БД: {e}")
+        logger.error(f"❌ ИСКЛЮЧЕНИЕ: {e}")
         import traceback
         logger.error(traceback.format_exc())
 
@@ -973,12 +969,6 @@ async def send_weekly_token_stats(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.info("No tokens in last 7 days to generate weekly statistics")
     
     logger.info("=== WEEKLY TOKEN STATISTICS GENERATION COMPLETED ===")
-
-
-
-# Добавить также необходимые импорты в начало файла, если их нет:
-import datetime
-from telegram.error import TimedOut, NetworkError
 
 # Получает данные о сигналах из SQLite базы данных tracker'а.
 def get_signals_data(contract_address: str) -> Optional[Dict[str, Any]]:

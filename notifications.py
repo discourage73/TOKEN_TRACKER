@@ -1,4 +1,3 @@
-# Создайте файл notifications.py
 import logging
 import asyncio
 import time

@@ -89,43 +89,6 @@ def format_enhanced_message(token_info: Dict[str, Any], initial_data: Optional[D
         # В случае ошибки возвращаем базовое сообщение
         return f"🪙 *Ticker*: {token_info.get('ticker', 'Неизвестно')}\n📝 *CA*: `{token_info.get('ticker_address', 'Неизвестно')}`\n\n💰 *Market Cap*: {token_info.get('market_cap', 'Неизвестно')}\n\n_Ошибка при форматировании полного сообщения_"
 
-def calculate_token_age(timestamp: Optional[int]) -> str:
-    """Рассчитывает возраст токена от времени создания с детальной разбивкой."""
-    if not timestamp:
-        return "Unknown"
-    
-    try:
-        # Преобразование timestamp из миллисекунд в секунды
-        creation_time = datetime.datetime.fromtimestamp(timestamp / 1000)
-        now = datetime.datetime.now()
-        delta = now - creation_time
-        
-        days = delta.days
-        hours = delta.seconds // 3600
-        minutes = (delta.seconds % 3600) // 60
-        
-        result = []
-        
-        if days > 0:
-            days_str = "day" if days == 1 else "days"
-            result.append(f"{days} {days_str}")
-        
-        if hours > 0:
-            hours_str = "hour" if hours == 1 else "hours"
-            result.append(f"{hours} {hours_str}")
-        
-        if minutes > 0 and days == 0:  # Показываем минуты только если прошло меньше дня
-            minutes_str = "minute" if minutes == 1 else "minutes"
-            result.append(f"{minutes} {minutes_str}")
-        
-        if not result:
-            return "Less than a minute"
-        
-        return " ".join(result)
-    except Exception as e:
-        logger.error(f"Ошибка при расчете возраста токена: {e}")
-        return "Unknown"
-
 def process_token_data(token_data: Dict[str, Any]) -> Dict[str, Any]:
     """Обрабатывает данные о токене."""
     # Извлекаем нужную информацию
@@ -154,8 +117,7 @@ def process_token_data(token_data: Dict[str, Any]) -> Dict[str, Any]:
     volume_1h_formatted = format_number(volume_1h)
     
     # Получаем время создания токена
-    pair_created_at = token_data.get('pairCreatedAt')
-    token_age = calculate_token_age(pair_created_at)
+    token_age = token_data.get('token_age', 'Unknown')
     
     # Получаем информацию о социальных сетях и сайтах
     info = token_data.get('info', {})

@@ -34,7 +34,7 @@ def setup_logging(app_name, log_level=logging.INFO):
     file_handler = RotatingFileHandler(
         log_file, 
         maxBytes=10*1024*1024,
-        backupCount=10,
+        backupCount=2,
         encoding='utf-8'
     )
     file_formatter = logging.Formatter(
