@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from typing import Dict, Any, Optional, Union, List
 
 import logging
@@ -54,7 +54,7 @@ def format_enhanced_message(token_info: Dict[str, Any], initial_data: Optional[D
         else:
             message += "\n"  # Добавляем дополнительный перенос, если нет соцсетей
         
-        current_time = datetime.datetime.now().strftime("%d.%m.%y %H:%M:%S")
+        current_time = datetime.now().strftime("%d.%m.%y %H:%M:%S")
         message += f"💰 *Market Cap*: {token_info.get('market_cap', 'Неизвестно')} | _Time: {current_time}_\n"
         
         message += f"⏱️ *Token age*: {token_info.get('token_age', 'Неизвестно')}\n\n"
@@ -117,7 +117,13 @@ def process_token_data(token_data: Dict[str, Any]) -> Dict[str, Any]:
     volume_1h_formatted = format_number(volume_1h)
     
     # Получаем время создания токена
-    token_age = token_data.get('token_age', 'Unknown')
+    if token_data.get('pairCreatedAt'):
+        delta = datetime.now() - datetime.fromtimestamp(token_data.get('pairCreatedAt')/1000)
+        days = delta.days
+        hours = delta.seconds // 3600
+        token_age = f"{days}d {hours}h" if days > 0 else f"{hours}h"
+    else:
+        token_age = "Unknown"
     
     # Получаем информацию о социальных сетях и сайтах
     info = token_data.get('info', {})
@@ -183,7 +189,7 @@ def format_tokens_list(tokens_data: Dict[str, Dict[str, Any]], page: int = 0, to
             if data.get('added_time'):
                 # Преобразуем timestamp в дату и время
                 import datetime
-                added_datetime = datetime.datetime.fromtimestamp(data.get('added_time', 0))
+                added_datetime = datetime.fromtimestamp(data.get('added_time', 0))
                 token_info['initial_time'] = added_datetime.strftime("%H:%M:%S")
                 token_info['added_date'] = added_datetime.strftime("%Y-%m-%d")
                 token_info['full_datetime'] = added_datetime.strftime("%Y-%m-%d %H:%M:%S")

@@ -17,7 +17,7 @@ from utils import process_token_data, format_enhanced_message, format_number
 from error_helpers import handle_exception
 from api_cache import get_token_info_from_api
 from http_client import http_client
-from notifications import add_growth_notification
+from notifications import add_growth_notification_with_reply
 from token_monitor_strategy import token_monitor_strategy
 
 # Настройка логгера
@@ -255,33 +255,9 @@ async def send_or_update_message(
                 disable_web_page_preview=True
             )
             
-            # NEW: Send to ALL recipients (admin + authorized users)
-            from handlers.auth_middleware import get_user_db
-            from config import CONTROL_ADMIN_IDS
-            user_db = get_user_db()
-            all_users = user_db.get_all_users()
-            active_users = [user for user in all_users if user['is_active']]
-            
-            # Create list of all recipients
-            recipients = []
-            
-            # Add active users (excluding admin to avoid duplicate - admin already got message above)
-            for user in active_users:
-                if user['user_id'] not in CONTROL_ADMIN_IDS:  # Skip admin (already sent above)
-                    recipients.append(user)
-            
-            # Send to all recipients
-            for user in recipients:
-                try:
-                    await context.bot.send_message(
-                        chat_id=user['user_id'],
-                        text=message,
-                        parse_mode=ParseMode.MARKDOWN,
-                        disable_web_page_preview=True
-                    )
-                    logger.info(f"New token info sent to user {user['user_id']}")
-                except Exception as e:
-                    logger.error(f"Error sending new token to user {user['user_id']}: {e}")
+            # NEW REPLY SYSTEM: Save message_id for all recipients (admin + users)
+            await save_message_for_all_recipients(query, sent_msg.message_id, sent_msg.chat_id, 
+                                                token_info, initial_data)
             
             # Save token data with admin's message_id
             token_data_to_store = {
@@ -571,11 +547,13 @@ async def monitor_token_market_caps(context: ContextTypes.DEFAULT_TYPE) -> None:
                         last_alert_multiplier = token_data.get('last_alert_multiplier', 1)
                         
                         if current_multiplier > last_alert_multiplier:
-                            # Отправляем уведомление о росте как ответ на информационное сообщение
-                            await add_growth_notification(chat_id, ticker, current_multiplier, market_cap, message_id)
-                            
-                            # Обновляем последний алерт
+                            # ИСПРАВЛЕНИЕ: Обновляем последний алерт СРАЗУ, чтобы избежать дублирования
                             token_storage.update_token_field(query, 'last_alert_multiplier', current_multiplier)
+                            token_data['last_alert_multiplier'] = current_multiplier  # Обновляем в памяти
+                            
+                            # Отправляем уведомление о росте как ответ на информационное сообщение
+                            await add_growth_notification_with_reply(chat_id, ticker, current_multiplier, market_cap, message_id, query)
+                            
                             logger.info(f"Отправлено уведомление о росте токена {ticker} до x{current_multiplier}")
                 
                 # Добавляем небольшую паузу между запросами к API
@@ -1402,9 +1380,111 @@ async def start_token_monitoring_system(telegram_context):
             context=telegram_context
         )
         
+        # Задача: Очистка старых записей user_token_messages (каждые 6 часов)
+        from notifications import cleanup_user_token_messages_task
+        scheduler.schedule_task(
+            "cleanup_user_messages",
+            cleanup_user_token_messages_task,
+            delay=3600,    # Начинаем через 1 час после запуска
+            interval=21600,  # Запускаем каждые 6 часов
+            priority=TaskPriority.LOW
+        )
+        
         logger.info("Система мониторинга токенов запущена")
         return True
         
     except Exception as e:
         logger.error(f"Ошибка запуска системы мониторинга: {e}")
         return False
+
+async def save_message_for_all_recipients(query: str, admin_message_id: int, admin_chat_id: int, 
+                                        token_info: dict, initial_data: dict):
+    """
+    НОВАЯ ФУНКЦИЯ: Сохраняет message_id для всех получателей после отправки токена.
+    Вызывается ПОСЛЕ существующей функции send_or_update_message.
+    """
+    try:
+        logger.info(f"Starting save_message_for_all_recipients for token {query[:20]}...")
+        
+        from handlers.auth_middleware import get_user_db
+        from config import CONTROL_ADMIN_IDS
+        
+        user_db = get_user_db()
+        
+        # Сохраняем для админа
+        logger.info(f"Saving admin message: admin_chat_id={admin_chat_id}, admin_message_id={admin_message_id}")
+        user_db.save_user_token_message(query, admin_chat_id, admin_message_id)
+        logger.info(f"Admin message saved successfully")
+        
+        # Получаем всех пользователей
+        all_users = user_db.get_all_users()
+        active_users = [user for user in all_users if user['is_active']]
+        logger.info(f"Found {len(all_users)} total users, {len(active_users)} active users")
+        
+        # ИСПРАВЛЕНИЕ: Исключаем только отправителя (admin_chat_id), чтобы избежать дублирования
+        # Все остальные (включая других админов) должны получать сообщения
+        users_to_notify = [user for user in active_users if user['user_id'] != admin_chat_id]
+        logger.info(f"Users to notify (excluding sender {admin_chat_id}): {len(users_to_notify)}")
+        for user in users_to_notify:
+            user_type = "ADMIN" if user['user_id'] in CONTROL_ADMIN_IDS else "USER"
+            logger.info(f"  - Will send to {user_type}: {user['user_id']}")
+        
+        context = get_telegram_context()
+        if not context:
+            logger.error("Telegram context is None! Cannot send messages.")
+            return
+        
+        logger.info("Telegram context obtained successfully")
+        
+        # Отправляем ВСЕМ пользователям (кроме отправителя)
+        for user in users_to_notify:
+            try:
+                logger.info(f"Processing user {user['user_id']}...")
+                
+                logger.info(f"Using provided token data for user {user['user_id']}...")
+                
+                # Используем переданные данные токена (они уже есть в памяти)
+                if not token_info:
+                    logger.error(f"No token_info provided for token {query}")
+                    continue
+                
+                # ИСПРАВЛЕНИЕ: Используем безопасное форматирование
+                try:
+                    formatted_message = format_enhanced_message(token_info, initial_data)
+                except Exception as format_error:
+                    logger.error(f"Error formatting message: {format_error}")
+                    # Fallback к простому формату
+                    symbol = token_info.get('symbol', 'Unknown')
+                    name = token_info.get('name', 'Unknown Token')
+                    price = token_info.get('price_usd', 0)
+                    
+                    formatted_message = f"🔸 *{symbol}* ({name})\n💵 Price: ${price}\n\nToken detected and added to monitoring!"
+                
+                logger.info(f"Sending message to user {user['user_id']}...")
+                
+                # Отправляем пользователю
+                user_msg = await context.bot.send_message(
+                    chat_id=user['user_id'],
+                    text=formatted_message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    disable_web_page_preview=True
+                )
+                
+                logger.info(f"Message sent successfully to user {user['user_id']}, message_id: {user_msg.message_id}")
+                
+                # Сохраняем message_id пользователя
+                user_db.save_user_token_message(query, user['user_id'], user_msg.message_id)
+                
+                logger.info(f"✅ Sent and saved token message for user {user['user_id']}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error sending token to user {user['user_id']}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"✅ save_message_for_all_recipients completed for token {query[:20]}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in save_message_for_all_recipients: {e}")
+        import traceback
+        logger.error(traceback.format_exc())

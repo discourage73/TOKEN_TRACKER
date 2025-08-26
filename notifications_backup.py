@@ -150,6 +150,111 @@ class NotificationManager:
 # Создаем глобальный экземпляр менеджера уведомлений
 notification_manager = NotificationManager()
 
+async def add_growth_notification(
+    chat_id: int, 
+    token_name: str, 
+    multiplier: int, 
+    market_cap: str,
+    reply_to_message_id: Optional[int] = None,
+    contract_address: Optional[str] = None
+) -> None:
+    """
+    HOTFIX: Исправляет ошибку "Message to be replied not found"
+    """
+    try:
+        from token_service import get_telegram_context
+        context = get_telegram_context()
+        
+        if not context:
+            logger.error(f"Could not get Telegram context for growth notification")
+            return
+        
+        # Формируем сообщение с огоньками
+        fire_emojis = "🔥" * min(multiplier, 10)
+        growth_message = (
+            f"{fire_emojis}\n"
+            f"*{token_name}* *{multiplier}x* from call!\n\n"
+            f"MCap: {market_cap}"
+        )
+        
+        # Получаем получателей
+        from handlers.auth_middleware import get_user_db
+        from config import CONTROL_ADMIN_IDS
+        user_db = get_user_db()
+        all_users = user_db.get_all_users()
+        active_users = [user for user in all_users if user['is_active']]
+        
+        recipients = []
+        
+        # Добавляем админа
+        for admin_id in CONTROL_ADMIN_IDS:
+            recipients.append({'user_id': admin_id, 'username': 'admin'})
+        
+        # Добавляем пользователей (исключая админа)
+        for user in active_users:
+            if user['user_id'] not in CONTROL_ADMIN_IDS:
+                recipients.append(user)
+        
+        if not recipients:
+            logger.warning("No recipients for growth notification")
+            return
+        
+        sent_count = 0
+        failed_count = 0
+        
+        # Отправляем уведомления
+        for user in recipients:
+            try:
+                # ИСПРАВЛЕНИЕ: ТОЛЬКО админ получает reply
+                if user['user_id'] in CONTROL_ADMIN_IDS and reply_to_message_id:
+                    await context.bot.send_message(
+                        chat_id=user['user_id'],
+                        text=growth_message,
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_to_message_id=reply_to_message_id
+                    )
+                    logger.info(f"Sent growth notification to admin {user['user_id']} as reply")
+                else:
+                    # ИСПРАВЛЕНИЕ: Обычные пользователи получают обычное сообщение
+                    await context.bot.send_message(
+                        chat_id=user['user_id'],
+                        text=growth_message,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    logger.info(f"Sent growth notification to user {user['user_id']} as regular message")
+                
+                sent_count += 1
+                
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"Error sending growth notification to user {user['user_id']}: {error_message}")
+                
+                # ДОПОЛНИТЕЛЬНАЯ ОБРАБОТКА ОШИБОК
+                if "Message to be replied not found" in error_message:
+                    logger.warning(f"Reply message not found for user {user['user_id']}, trying without reply...")
+                    
+                    # Fallback: отправляем без reply
+                    try:
+                        await context.bot.send_message(
+                            chat_id=user['user_id'],
+                            text=growth_message,
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                        sent_count += 1
+                        logger.info(f"Successfully sent fallback message to user {user['user_id']}")
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback also failed for user {user['user_id']}: {str(fallback_error)}")
+                        failed_count += 1
+                else:
+                    failed_count += 1
+        
+        logger.info(f"Growth notification for token {token_name} to x{multiplier}: sent {sent_count}, failed {failed_count}")
+            
+    except Exception as e:
+        logger.error(f"Error sending growth notification for token {token_name}: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+
 async def add_growth_notification_with_reply(
     chat_id: int, 
     token_name: str, 
@@ -187,7 +292,9 @@ async def add_growth_notification_with_reply(
         users_for_token = user_db.get_all_users_for_token(token_query)
         
         if not users_for_token:
-            logger.warning(f"No users found in new system for {token_query} - skipping notification")
+            logger.info(f"No users found in new system for {token_query}, falling back to old system")
+            # Вызываем СТАРУЮ функцию как fallback
+            await add_growth_notification(chat_id, token_name, multiplier, market_cap, reply_to_message_id, contract_address)
             return
         
         # НОВАЯ ЛОГИКА с reply и удалением
@@ -260,8 +367,8 @@ async def add_growth_notification_with_reply(
         
     except Exception as e:
         logger.error(f"Error in add_growth_notification_with_reply: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        # Fallback на старую функцию
+        await add_growth_notification(chat_id, token_name, multiplier, market_cap, reply_to_message_id, contract_address)
 
 async def cleanup_user_token_messages_task() -> None:
     """НОВАЯ ФУНКЦИЯ: Задача для периодической очистки старых записей"""

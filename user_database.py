@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple 
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +11,7 @@ class UserDatabase:
         self.db_path = db_path
         self.init_users_table()
         self.init_potential_users_table()
+        self.init_user_token_messages_table()
     
     # Добавить в user_database.py в класс UserDatabase
 
@@ -267,8 +268,180 @@ class UserDatabase:
         except Exception as e:
             logger.error(f"Ошибка получения пользователей: {e}")
             return []
+        
 
+    def init_user_token_messages_table(self):
+        """НОВАЯ ФУНКЦИЯ: Создает таблицу для связи токен-пользователь-сообщение"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+        
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_token_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_query TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    token_message_id INTEGER,
+                    growth_message_id INTEGER,
+                    current_multiplier INTEGER DEFAULT 1,
+                    token_sent_at TIMESTAMP DEFAULT (datetime('now', '+3 hours')),
+                    growth_updated_at TIMESTAMP,
+                    UNIQUE(token_query, user_id)
+                )
+            ''')
+        
+            # Создаем индексы
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_user_token_messages_token_user 
+                ON user_token_messages(token_query, user_id)
+            ''')
+        
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_user_token_messages_user_id 
+                ON user_token_messages(user_id)
+            ''')
+        
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_user_token_messages_token_sent_at 
+                ON user_token_messages(token_sent_at)
+            ''')
+        
+            conn.commit()
+            conn.close()
+            logger.info("Таблица user_token_messages создана успешно")
+        
+        except Exception as e:
+            logger.error(f"Ошибка создания таблицы user_token_messages: {e}")
 
+    def save_user_token_message(self, token_query: str, user_id: int, message_id: int) -> bool:
+        """НОВАЯ ФУНКЦИЯ: Сохраняет ID сообщения о токене для пользователя"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT OR REPLACE INTO user_token_messages 
+                (token_query, user_id, token_message_id, token_sent_at)
+                VALUES (?, ?, ?, datetime('now', '+3 hours'))
+            ''', (token_query, user_id, message_id))
+            
+            conn.commit()
+            conn.close()
+            logger.info(f"Сохранен message_id {message_id} для пользователя {user_id}, токен {token_query}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Ошибка сохранения user_token_message: {e}")
+            return False
+
+    def get_user_token_message(self, token_query: str, user_id: int) -> Optional[int]:
+        """НОВАЯ ФУНКЦИЯ: Получает ID сообщения о токене для пользователя"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT token_message_id FROM user_token_messages 
+                WHERE token_query = ? AND user_id = ?
+            ''', (token_query, user_id))
+            
+            result = cursor.fetchone()
+            conn.close()
+            return result[0] if result else None
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения user_token_message: {e}")
+            return None
+
+    def update_user_growth_message(self, token_query: str, user_id: int, growth_message_id: int, multiplier: int) -> bool:
+        """НОВАЯ ФУНКЦИЯ: Обновляет ID сообщения о росте токена"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                UPDATE user_token_messages 
+                SET growth_message_id = ?, current_multiplier = ?, growth_updated_at = datetime('now', '+3 hours')
+                WHERE token_query = ? AND user_id = ?
+            ''', (growth_message_id, multiplier, token_query, user_id))
+            
+            conn.commit()
+            rows_affected = cursor.rowcount
+            conn.close()
+            return rows_affected > 0
+            
+        except Exception as e:
+            logger.error(f"Ошибка обновления user_growth_message: {e}")
+            return False
+
+    def get_user_growth_message(self, token_query: str, user_id: int) -> Optional[Tuple[int, int]]:
+        """НОВАЯ ФУНКЦИЯ: Получает ID текущего сообщения о росте и множитель"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT growth_message_id, current_multiplier 
+                FROM user_token_messages 
+                WHERE token_query = ? AND user_id = ?
+            ''', (token_query, user_id))
+            
+            result = cursor.fetchone()
+            conn.close()
+            return result if result else None
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения user_growth_message: {e}")
+            return None
+
+    def get_all_users_for_token(self, token_query: str) -> List[Dict[str, Any]]:
+        """НОВАЯ ФУНКЦИЯ: Получает всех пользователей для токена"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                SELECT utm.user_id, utm.token_message_id, utm.growth_message_id, 
+                    utm.current_multiplier, u.username, u.is_active
+                FROM user_token_messages utm
+                LEFT JOIN users u ON utm.user_id = u.user_id
+                WHERE utm.token_query = ? AND (u.is_active = 1 OR u.is_active IS NULL)
+            ''', (token_query,))
+            
+            results = [dict(row) for row in cursor.fetchall()]
+            conn.close()
+            return results
+            
+        except Exception as e:
+            logger.error(f"Ошибка получения пользователей для токена: {e}")
+            return []
+
+    def cleanup_old_user_messages(self, days_old: int = 14) -> int:
+        """НОВАЯ ФУНКЦИЯ: Удаляет старые записи сообщений (автоочистка)"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                DELETE FROM user_token_messages 
+                WHERE token_sent_at < datetime('now', '-' || ? || ' days')
+            ''', (days_old,))
+            
+            deleted_count = cursor.rowcount
+            conn.commit()
+            conn.close()
+            
+            if deleted_count > 0:
+                logger.info(f"Удалено {deleted_count} старых записей user_token_messages")
+            
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Ошибка очистки старых user_token_messages: {e}")
+            return 0
+    
+    
 
 # Глобальный экземпляр
 user_db = UserDatabase()

@@ -290,12 +290,23 @@ def save_tokens_to_db():
             
             # ОРИГИНАЛЬНЫЙ SQL + raw_api_data
             cursor.execute('''
-            INSERT OR REPLACE INTO tokens 
+            INSERT INTO tokens 
             (contract, channels, channel_times, channel_count, first_seen, signal_reached_time, 
-             time_to_threshold, message_sent, message_id, emojis, updated_at, raw_api_data)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             time_to_threshold, message_sent, message_id, emojis, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(contract) DO UPDATE SET
+                channels = excluded.channels,
+                channel_times = excluded.channel_times,
+                channel_count = excluded.channel_count,
+                signal_reached_time = excluded.signal_reached_time,
+                time_to_threshold = excluded.time_to_threshold,
+                message_sent = excluded.message_sent,
+                message_id = excluded.message_id,
+                emojis = excluded.emojis,
+                updated_at = excluded.updated_at
+                -- raw_api_data НЕ ТРОГАЕМ - оставляем как есть!
             ''', (contract, channels, channel_times, channel_count, first_seen, signal_reached_time,
-                  time_to_threshold, message_sent, message_id, emojis, current_time, raw_api_data_json))
+                time_to_threshold, message_sent, message_id, emojis, current_time))
         
         conn.commit()
         conn.close()
