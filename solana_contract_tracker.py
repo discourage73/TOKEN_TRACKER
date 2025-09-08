@@ -49,10 +49,9 @@ def safe_str(text):
 
 # Импортируем конфигурацию
 from config import TELEGRAM_TOKEN, DEXSCREENER_API_URL, API_ID, API_HASH, TARGET_BOT
-import token_storage
 
 # Минимальное количество каналов для отправки сигнала в RadarDexBot
-MIN_SIGNALS = 15  # Токен должен появиться минимум в 20 каналах
+MIN_SIGNALS = 20  # Токен должен появиться минимум в 20 каналах
 
 # Словарь соответствия тегов и эмодзи
 TAG_EMOJI_MAP = {
@@ -101,10 +100,11 @@ SOURCE_CHANNELS = {
     2380594298: {"name": "@whaleBuyBotFree", "tag": "Whale Bought"},
     2249008099: {"name": "@SIGNALMEVX", "tag": "TG_KOL"},
     1700113598: {"name": "@KhronosAllChain", "tag": "TG_KOL"},
-    #2305781763: {"name": "@mevxpfdexpaid", "tag": "TG_KOL"},
+    2305781763: {"name": "@mevxpfdexpaid", "tag": "TG_KOL"},
     2589360530: {"name": "@AveSignalMonitor", "tag": "TG_KOL"},
     2531914184: {"name": "@astrasolcalls", "tag": "TG_KOL"},
-    1159025019: {"name": "@TopWhaleCalls", "tag": "TG_KOL"},
+    1419575394: {"name": "@WizzyTrades", "tag": "TG_KOL"},
+    1955928748: {"name": "@XAceCalls", "tag": "TG_KOL"},
     1845214884: {"name": "@TehPump_Calls", "tag": "TG_KOL"},
     2715551388: {"name": "@degenjamesai", "tag": "TG_KOL"},
     2521423800: {"name": "@RobinHood_Smarts", "tag": "TG_KOL"},
@@ -226,7 +226,7 @@ def init_tracker_db():
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
-        # СОЗДАЕМ таблицу СРАЗУ с raw_api_data
+        # Создаем таблицу для ВСЕХ токенов с новыми полями
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS tokens (
             contract TEXT PRIMARY KEY,
@@ -239,41 +239,42 @@ def init_tracker_db():
             emojis TEXT DEFAULT '',
             updated_at TEXT,
             message_sent INTEGER DEFAULT 0,
-            message_id INTEGER DEFAULT 0,
-            raw_api_data TEXT DEFAULT NULL
+            message_id INTEGER DEFAULT 0
         )
         ''')
         
-        # Для существующих БД добавляем столбец (если его нет)
-        try:
-            cursor.execute('ALTER TABLE tokens ADD COLUMN raw_api_data TEXT DEFAULT NULL')
-            logger.info("✅ Добавлен столбец raw_api_data в существующую таблицу")
-        except sqlite3.OperationalError:
-            # Столбец уже существует или таблица только что создана
-            pass
+        # Создаем индексы для оптимизации
+        cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_tokens_channel_count 
+        ON tokens(channel_count)
+        ''')
         
-        # Остальные индексы
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_channel_count ON tokens(channel_count)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_first_seen ON tokens(first_seen)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tokens_message_sent ON tokens(message_sent)')
+        cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_tokens_first_seen 
+        ON tokens(first_seen)
+        ''')
+        
+        cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_tokens_message_sent 
+        ON tokens(message_sent)
+        ''')
         
         conn.commit()
         conn.close()
-        logger.info("✅ Таблица tracker инициализирована с raw_api_data")
+        logger.info("SQLite таблица для ВСЕХ токенов инициализирована")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка инициализации: {e}")
+        logger.error(f"Ошибка при инициализации SQLite БД: {e}")
 
 def save_tokens_to_db():
-    """ОРИГИНАЛЬНАЯ функция + только raw_api_data"""
+    """Сохраняет ВСЕ данные tokens_db в SQLite базу данных."""
     try:
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
         for contract, data in tokens_db.items():
-            # ОРИГИНАЛЬНАЯ логика (БЕЗ ИЗМЕНЕНИЙ)
+            # Получаем данные из tokens_db
             channels = ', '.join(data.get('channels', []))
-            channel_times = json.dumps(data.get('channel_times', {}), ensure_ascii=False)
             channel_count = data.get('channel_count', 0)
             first_seen = data.get('first_seen', '')
             signal_reached_time = data.get('signal_reached_time', None)
@@ -281,69 +282,76 @@ def save_tokens_to_db():
             message_sent = 1 if data.get('message_sent', False) else 0
             message_id = data.get('message_id', 0)
             emojis = data.get('emojis', '')
+            
+            # Сериализуем channel_times в JSON строку
+            channel_times = json.dumps(data.get('channel_times', {}), ensure_ascii=False)
+            
+            # Используем локальное время для updated_at
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # ТОЛЬКО добавляем raw_api_data
-            raw_api_data_json = None
-            if "raw_api_data" in data and data["raw_api_data"]:
-                raw_api_data_json = json.dumps(data["raw_api_data"], ensure_ascii=False)
+            # Сначала получаем существующие token_info и raw_api_data
+            cursor.execute('SELECT token_info, raw_api_data FROM tokens WHERE contract = ?', (contract,))
+            existing_data = cursor.fetchone()
+            existing_token_info = existing_data[0] if existing_data else None
+            existing_raw_api_data = existing_data[1] if existing_data else None
             
-            # ОРИГИНАЛЬНЫЙ SQL + raw_api_data
+            # Используем INSERT OR REPLACE, сохраняя существующие token_info и raw_api_data
             cursor.execute('''
-            INSERT INTO tokens 
+            INSERT OR REPLACE INTO tokens 
             (contract, channels, channel_times, channel_count, first_seen, signal_reached_time, 
-             time_to_threshold, message_sent, message_id, emojis, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(contract) DO UPDATE SET
-                channels = excluded.channels,
-                channel_times = excluded.channel_times,
-                channel_count = excluded.channel_count,
-                signal_reached_time = excluded.signal_reached_time,
-                time_to_threshold = excluded.time_to_threshold,
-                message_sent = excluded.message_sent,
-                message_id = excluded.message_id,
-                emojis = excluded.emojis,
-                updated_at = excluded.updated_at
-                -- raw_api_data НЕ ТРОГАЕМ - оставляем как есть!
+             time_to_threshold, message_sent, message_id, emojis, updated_at, token_info, raw_api_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (contract, channels, channel_times, channel_count, first_seen, signal_reached_time,
-                time_to_threshold, message_sent, message_id, emojis, current_time))
+                  time_to_threshold, message_sent, message_id, emojis, current_time, 
+                  existing_token_info, existing_raw_api_data))
         
         conn.commit()
         conn.close()
-        logger.info(f"✅ Сохранено {len(tokens_db)} токенов")
+        logger.info(f"Сохранено {len(tokens_db)} ВСЕХ токенов в SQLite базу данных")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка сохранения: {e}")
+        logger.error(f"Ошибка при сохранении всех токенов в SQLite: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 def load_tokens_from_db():
-    """ОРИГИНАЛЬНАЯ функция + только raw_api_data"""
+    """Загружает данные tokens_db из SQLite базы данных."""
     global tokens_db
-    
     try:
+        if not os.path.exists(TRACKER_DB_PATH):
+            logger.info("SQLite база не найдена")
+            return
+            
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
         cursor.execute('SELECT * FROM tokens')
         rows = cursor.fetchall()
         
+        # Получаем названия колонок
         column_names = [description[0] for description in cursor.description]
         
         for row in rows:
+            # Конвертируем строку в словарь
             row_dict = dict(zip(column_names, row))
             contract = row_dict['contract']
             
-            # ОРИГИНАЛЬНАЯ логика (БЕЗ ИЗМЕНЕНИЙ)
+            # Десериализуем channel_times из JSON
             channel_times = json.loads(row_dict['channel_times']) if row_dict['channel_times'] else {}
+            
+            # Конвертируем channels обратно в список
             channels = row_dict['channels'].split(', ') if row_dict['channels'] else []
             
+            # Сохраняем полный формат времени
             first_seen = row_dict['first_seen']
-            if first_seen and len(first_seen) == 8:
+            # Если формат неполный, добавляем текущую дату
+            if first_seen and len(first_seen) == 8:  # Только время HH:MM:SS
                 current_date = datetime.now().strftime("%Y-%m-%d")
                 first_seen = f"{current_date} {first_seen}"
             elif not first_seen:
                 first_seen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # ОРИГИНАЛЬНАЯ структура
+            # Формируем данные для tokens_db
             tokens_db[contract] = {
                 'channels': channels,
                 'channel_times': channel_times,
@@ -353,22 +361,16 @@ def load_tokens_from_db():
                 'time_to_threshold': row_dict.get('time_to_threshold'),
                 'message_sent': bool(row_dict['message_sent']),
                 'message_id': row_dict['message_id'],
-                'emojis': row_dict.get('emojis', '')
+                'emojis': row_dict['emojis']
             }
-            
-            # ТОЛЬКО добавляем raw_api_data
-            if 'raw_api_data' in row_dict and row_dict['raw_api_data']:
-                try:
-                    tokens_db[contract]["raw_api_data"] = json.loads(row_dict['raw_api_data'])
-                except:
-                    tokens_db[contract]["raw_api_data"] = None
         
         conn.close()
-        logger.info(f"✅ Загружено {len(tokens_db)} токенов")
+        logger.info(f"Загружено {len(tokens_db)} ВСЕХ токенов из SQLite базы данных")
         
     except Exception as e:
-        logger.error(f"❌ Ошибка загрузки: {e}")
-        tokens_db = {}
+        logger.error(f"Ошибка при загрузке всех токенов из SQLite: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 TOKEN_LIFETIME_MINUTES = 2880  # через 2 дня токен удаляется из базы
 
@@ -380,7 +382,7 @@ def cleanup_old_tokens():
         cutoff_time = current_time - timedelta(minutes=TOKEN_LIFETIME_MINUTES)
         cutoff_time_str = cutoff_time.strftime("%Y-%m-%d %H:%M:%S")
         
-        logger.info(f"⏰ Удаляем токены старше: {cutoff_time_str}")
+        logger.info(f"⏰ Удаляем Tokens старше: {cutoff_time_str}")
         
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
@@ -438,7 +440,7 @@ def load_database():
         # Инициализируем SQLite базу для ВСЕХ токенов
         init_tracker_db()
         
-        # Загружаем ВСЕ токены из SQLite
+        # Загружаем ВСЕ Tokens из SQLite
         load_tokens_from_db()
         
         # Если tokens_db пустая, создаем новую
@@ -453,7 +455,7 @@ def load_database():
 # Функция сохранения базы данных
 def save_database():
     try:
-        # Сохраняем ВСЕ токены в SQLite
+        # Сохраняем ВСЕ Tokens в SQLite
         save_tokens_to_db()
     except Exception as e:
         logger.error(f"Ошибка при сохранении базы данных: {e}")
@@ -503,7 +505,7 @@ async def main():
                 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
                 for contract in contracts:
-                    logger.info(f"Обрабатываем контракт: {contract}")
+                    logger.info(f"Обрабатываем Contract: {contract}")
                     
                     # Проверяем, существует ли уже этот токен в базе
                     if contract in tokens_db:
@@ -540,7 +542,7 @@ async def main():
                                 try:
                                     sent_message = await client.send_message(
                                         TARGET_BOT,
-                                        f"Контракт: {contract}\n{emojis} ({time_to_threshold})"  # ← ИСПРАВЛЕНО
+                                        f"Contract: {contract}\n{emojis} ({time_to_threshold})"  # ← ИСПРАВЛЕНО
                                     )
                                     tokens_db[contract]["message_sent"] = True
                                     tokens_db[contract]["message_id"] = sent_message.id
@@ -590,7 +592,7 @@ async def main():
                 logger.info("🧹 cleanup_old_tokens() выполнена")
                     
             except Exception as e:
-                logger.error(f"❌ ОШИБКА в periodic_save: {e}")
+                logger.error(f"❌ Error in periodic_save: {e}")
                 logger.error(traceback.format_exc())
                 await asyncio.sleep(60)
     
@@ -605,7 +607,7 @@ async def main():
     except KeyboardInterrupt:
         logger.info("Бот остановлен пользователем")
     except Exception as e:
-        logger.error(f"Ошибка в основном цикле: {e}")
+        logger.error(f"Error in основном цикле: {e}")
         import traceback
         logger.error(traceback.format_exc())
     finally:

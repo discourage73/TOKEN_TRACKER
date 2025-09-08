@@ -112,7 +112,7 @@ def get_json_response(url: str, params: Optional[Dict[str, Any]] = None) -> Opti
         response = http_client.get(url, params=params)
         if response.status_code == 200:
             return response.json()
-        logger.warning(f"Ошибка API: {response.status_code}, URL: {url}")
+        logger.warning(f"API error: {response.status_code}, URL: {url}")
         return None
     except Exception as e:
         logger.error(f"Ошибка при получении JSON-данных из {url}: {str(e)}")

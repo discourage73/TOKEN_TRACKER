@@ -16,7 +16,7 @@ def handle_exception(
     Декоратор для единообразной обработки исключений.
     
     Args:
-        log_msg: Сообщение для логирования (помимо исключения)
+        log_msg: message для логирования (помимо исключения)
         return_value: Значение, возвращаемое в случае исключения
         notify_user: Отправлять ли уведомление пользователю
     
@@ -29,8 +29,8 @@ def handle_exception(
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                # Формируем сообщение об ошибке
-                error_message = f"Ошибка в {func.__name__}: {str(e)}"
+                # Формируем message об ошибке
+                error_message = f"Error in {func.__name__}: {str(e)}"
                 if log_msg:
                     error_message = f"{log_msg}: {error_message}"
                 
@@ -47,10 +47,10 @@ def handle_exception(
                         try:
                             await context.bot.send_message(
                                 chat_id=chat_id,
-                                text="Произошла ошибка при обработке запроса. Пожалуйста, попробуйте позже."
+                                text="An error occurred при обработке запроса. Пожалуйста, попробуйте позже."
                             )
                         except Exception:
-                            logger.error("Не удалось отправить сообщение об ошибке пользователю")
+                            logger.error("failed to отправить message об ошибке пользователю")
                 
                 return return_value
                 
@@ -59,8 +59,8 @@ def handle_exception(
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                # Формируем сообщение об ошибке
-                error_message = f"Ошибка в {func.__name__}: {str(e)}"
+                # Формируем message об ошибке
+                error_message = f"Error in {func.__name__}: {str(e)}"
                 if log_msg:
                     error_message = f"{log_msg}: {error_message}"
                 

@@ -8,8 +8,8 @@ logger = logging.getLogger(__name__)
 
 class TokenCategory(Enum):
     """Категории токенов по активности."""
-    HOT = 0        # Токен проявляет высокую активность (рост >10% за последний час)
-    ACTIVE = 1     # Токен проявляет умеренную активность (рост 5-10%)
+    HOT = 0        # Токен проявляет высокую активность (Growth >10% за последний час)
+    ACTIVE = 1     # Токен проявляет умеренную активность (Growth 5-10%)
     STABLE = 2     # Токен стабилен (изменения <5%)
     INACTIVE = 3   # Токен не проявляет активности долгое время
 
@@ -26,25 +26,25 @@ class TokenMonitorStrategy:
     """
     
     def __init__(self):
-        # Таблица стратегий для разных категорий токенов
+        # Таблица стратегий для разных категорий токенов (на основе времени с момента сигнала)
         self.strategy_table: Dict[TokenCategory, TokenMonitorConfig] = {
             TokenCategory.HOT: TokenMonitorConfig(
-                check_interval=30,        # каждые 30 секунд
+                check_interval=10,        # каждые 10 секунд (0-2 часа после сигнала)
                 growth_threshold=5.0,     # 5% для отправки уведомления
                 category=TokenCategory.HOT
             ),
             TokenCategory.ACTIVE: TokenMonitorConfig(
-                check_interval=180,       # каждые 3 минуты
+                check_interval=30,        # каждые 30 секунд (2-8 часов после сигнала)
                 growth_threshold=10.0,    # 10% для отправки уведомления
                 category=TokenCategory.ACTIVE
             ),
             TokenCategory.STABLE: TokenMonitorConfig(
-                check_interval=600,       # каждые 10 минут
+                check_interval=180,       # каждые 3 минуты (8-24 часа после сигнала)
                 growth_threshold=15.0,    # 15% для отправки уведомления
                 category=TokenCategory.STABLE
             ),
             TokenCategory.INACTIVE: TokenMonitorConfig(
-                check_interval=1800,      # каждые 30 минут
+                check_interval=600,       # каждые 10 минут (>24 часа после сигнала)
                 growth_threshold=20.0,    # 20% для отправки уведомления
                 category=TokenCategory.INACTIVE
             )
@@ -72,59 +72,60 @@ class TokenMonitorStrategy:
 
     def categorize_token(self, token_data: Dict[str, Any]) -> TokenCategory:
         """
-        Определяет категорию токена на основе его активности.
+        Определяет категорию токена на основе времени с момента достижения сигнала.
         
         Args:
-            token_data: Данные о токене
+            token_data: Данные о токене включая signal_reached_time
             
         Returns:
             Категория токена
         """
-        # Извлекаем данные о возрасте и росте
-        added_time = token_data.get('added_time', 0)
-        current_time = time.time()
-        token_age_seconds = current_time - added_time
+        import datetime
         
-        # Получаем данные о росте
-        token_info = token_data.get('token_info', {})
-        initial_data = token_data.get('initial_data', {})
+        # Получаем signal_reached_time из данных токена
+        signal_reached_time = token_data.get('signal_reached_time')
         
-        current_mcap = token_info.get('raw_market_cap', 0)
-        initial_mcap = initial_data.get('raw_market_cap', 0)
-        
-        # Вычисляем рост в процентах
-        growth_percent = 0
-        if initial_mcap and current_mcap and initial_mcap > 0:
-            growth_percent = ((current_mcap / initial_mcap) - 1) * 100
-        
-        # Анализируем историю роста
-        price_history = token_data.get('price_history', [])
-        recent_growth = 0
-        
-        if len(price_history) >= 2:
-            recent_prices = price_history[-2:]  # Последние две записи
-            if recent_prices[0] > 0:
-                recent_growth = ((recent_prices[1] / recent_prices[0]) - 1) * 100
-        
-        # Определяем категорию на основе возраста и роста
-        if token_age_seconds < 3600:  # < 1 час
+        if not signal_reached_time:
+            # Если нет signal_reached_time, используем created_time как fallback
+            signal_reached_time = token_data.get('created_time')
+            
+        if not signal_reached_time:
+            # Если вообще нет времени, считаем токен новым (HOT)
+            logger.warning(f"No signal_reached_time for token, defaulting to HOT")
             return TokenCategory.HOT
         
-        if token_age_seconds < 86400:  # < 24 часа
-            if growth_percent > 100 or recent_growth > 10:
-                return TokenCategory.HOT
-            elif growth_percent > 50 or recent_growth > 5:
-                return TokenCategory.ACTIVE
+        try:
+            # Преобразуем signal_reached_time в datetime если это строка
+            if isinstance(signal_reached_time, str):
+                # Поддерживаем форматы: "2025-01-01 12:00:00" или "2025-01-01T12:00:00"
+                if 'T' in signal_reached_time:
+                    signal_time = datetime.datetime.fromisoformat(signal_reached_time.replace('Z', '+00:00'))
+                else:
+                    signal_time = datetime.datetime.strptime(signal_reached_time, '%Y-%m-%d %H:%M:%S')
             else:
-                return TokenCategory.STABLE
-        
-        # Для токенов старше 24 часов
-        if growth_percent > 200 or recent_growth > 20:
-            return TokenCategory.ACTIVE
-        elif growth_percent > 50 or recent_growth > 5:
-            return TokenCategory.STABLE
-        else:
-            return TokenCategory.INACTIVE
+                # Если уже datetime объект
+                signal_time = signal_reached_time
+            
+            # Текущее время
+            current_time = datetime.datetime.now()
+            
+            # Вычисляем разность в часах
+            hours_since_signal = (current_time - signal_time).total_seconds() / 3600
+            
+            # Определяем категорию на основе времени с момента сигнала
+            if hours_since_signal <= 2:
+                return TokenCategory.HOT      # 0-2 часа: каждые 10 секунд
+            elif hours_since_signal <= 8:
+                return TokenCategory.ACTIVE   # 2-8 часов: каждые 30 секунд
+            elif hours_since_signal <= 24:
+                return TokenCategory.STABLE   # 8-24 часа: каждые 3 минуты
+            else:
+                return TokenCategory.INACTIVE # >24 часов: каждые 10 минут
+                
+        except Exception as e:
+            logger.error(f"Error parsing signal_reached_time '{signal_reached_time}': {e}")
+            # При ошибке считаем токен новым
+            return TokenCategory.HOT
     
     def should_check_token(self, query: str, token_data: Dict[str, Any]) -> bool:
         """
@@ -214,7 +215,7 @@ class TokenMonitorStrategy:
         
         Args:
             query: Запрос токена
-            current_growth: Текущий рост в процентах
+            current_growth: Текущий Growth в процентах
             
         Returns:
             True, если нужно отправить уведомление, иначе False
@@ -227,7 +228,7 @@ class TokenMonitorStrategy:
     
     def get_all_tokens_by_category(self) -> Dict[TokenCategory, List[str]]:
         """
-        Возвращает все токены, сгруппированные по категориям.
+        Возвращает все Tokens, сгруппированные по категориям.
         
         Returns:
             Словарь категория -> список токенов
@@ -273,6 +274,16 @@ class TokenMonitorStrategy:
                 tokens_to_check.append(query)
         
         return tokens_to_check
+    
+    def update_check_time(self, query: str) -> None:
+        """
+        Обновляет время последней проверки токена.
+        
+        Args:
+            query: Адрес токена
+        """
+        self.last_check_time[query] = time.time()
+        logger.debug(f"Обновлено время проверки для токена {query}")
 
 # Создаем глобальный экземпляр стратегии
 token_monitor_strategy = TokenMonitorStrategy()

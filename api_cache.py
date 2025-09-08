@@ -1,4 +1,4 @@
-# api_cache.py - УЛУЧШЕННАЯ ВЕРСИЯ с умным кешированием
+# api_cache.py - ENHANCED VERSION with smart caching
 
 import time
 import logging
@@ -9,14 +9,14 @@ import random
 
 logger = logging.getLogger(__name__)
 
-# ГЛОБАЛЬНЫЙ КЕШ для всех API запросов (и старых, и новых функций)
+# GLOBAL CACHE for all API requests (old and new functions)
 _global_api_cache: Dict[str, Dict[str, Any]] = {}
 _cache_timestamps: Dict[str, float] = {}
-_cache_timeout = 120  # 2 минуты - достаточно для избежания дублирования
+_cache_timeout = 120  # 2 minutes - enough to avoid duplication
 
 def timed_lru_cache(seconds: int = 60, maxsize: int = 128) -> Callable:
     """
-    Декоратор для кэширования результатов функции с ограниченным временем жизни.
+    Decorator for caching function results with limited lifetime.
     """
     def decorator(func: Callable) -> Callable:
         cache = {}
@@ -28,18 +28,18 @@ def timed_lru_cache(seconds: int = 60, maxsize: int = 128) -> Callable:
             key = str(args) + str(kwargs)
             current_time = time.time()
             
-            # СНАЧАЛА проверяем ГЛОБАЛЬНЫЙ кеш
+            # FIRST check GLOBAL cache
             if key in _global_api_cache:
                 cache_age = current_time - _cache_timestamps.get(key, 0)
                 if cache_age < _cache_timeout:
-                    logger.debug(f"Используем ГЛОБАЛЬНЫЙ кеш для {key[:50]}...")
+                    logger.debug(f"Using GLOBAL cache for {key[:50]}...")
                     return _global_api_cache[key]
                 else:
-                    # Очищаем устаревший глобальный кеш
+                    # Clear stale global cache
                     _global_api_cache.pop(key, None)
                     _cache_timestamps.pop(key, None)
             
-            # Очистка истекших ключей локального кеша
+            # Clear expired local cache keys
             for k in list(timestamps.keys()):
                 if current_time - timestamps[k] > seconds:
                     cache.pop(k, None)
@@ -47,26 +47,26 @@ def timed_lru_cache(seconds: int = 60, maxsize: int = 128) -> Callable:
                     if k in key_order:
                         key_order.remove(k)
             
-            # Если ключ в локальном кеше и не истек, возвращаем кэшированное значение
+            # If key is in local cache and not expired, return cached value
             if key in cache:
                 timestamps[key] = current_time
                 key_order.remove(key)
                 key_order.append(key)
                 return cache[key]
             
-            # Вызываем функцию и сохраняем результат в ОБА кеша
+            # Call function and save result in BOTH caches
             result = func(*args, **kwargs)
             
-            # Локальный кеш
+            # Local cache
             cache[key] = result
             timestamps[key] = current_time
             key_order.append(key)
             
-            # Глобальный кеш
+            # Global cache
             _global_api_cache[key] = result
             _cache_timestamps[key] = current_time
             
-            # Проверяем размер локального кеша
+            # Check local cache size
             if len(cache) > maxsize:
                 oldest_key = key_order.pop(0)
                 cache.pop(oldest_key, None)
@@ -85,66 +85,60 @@ def timed_lru_cache(seconds: int = 60, maxsize: int = 128) -> Callable:
     return decorator
 
 
-# ========== УМНЫЕ ФУНКЦИИ КЕШИРОВАНИЯ ==========
+# ========== SMART CACHING FUNCTIONS ==========
 
 def get_from_global_cache(cache_key: str) -> Optional[Dict[str, Any]]:
     """
-    Получает данные из глобального кеша, если они актуальны.
+    Gets data from global cache if it's current.
     
     Args:
-        cache_key: Ключ для поиска в кеше
+        cache_key: Key to search in cache
         
     Returns:
-        Данные из кеша или None
+        Data from cache or None
     """
     current_time = time.time()
     
     if cache_key in _global_api_cache:
         cache_age = current_time - _cache_timestamps.get(cache_key, 0)
         if cache_age < _cache_timeout:
-            logger.debug(f"Найдены актуальные данные в глобальном кеше (возраст: {cache_age:.1f}с)")
+            logger.debug(f"Found current data in global cache (age: {cache_age:.1f}s)")
             return _global_api_cache[cache_key]
         else:
-            # Удаляем устаревший кеш
+            # Remove stale cache
             _global_api_cache.pop(cache_key, None)
             _cache_timestamps.pop(cache_key, None)
-            logger.debug(f"Удален устаревший кеш (возраст: {cache_age:.1f}с)")
+            logger.debug(f"Removed stale cache (age: {cache_age:.1f}s)")
     
     return None
 
 
 def save_to_global_cache(cache_key: str, data: Dict[str, Any]) -> None:
     """
-    Сохраняет данные в глобальный кеш.
+    Saves data to global cache.
     
     Args:
-        cache_key: Ключ для сохранения
-        data: Данные для сохранения
+        cache_key: Key for saving
+        data: Data to save
     """
     current_time = time.time()
     _global_api_cache[cache_key] = data
     _cache_timestamps[cache_key] = current_time
-    logger.debug(f"Данные сохранены в глобальный кеш: {cache_key[:50]}...")
+    logger.debug(f"Data saved to global cache: {cache_key[:50]}...")
 
 
-def clear_global_cache() -> None:
-    """Очищает глобальный кеш"""
-    global _global_api_cache, _cache_timestamps
-    _global_api_cache.clear()
-    _cache_timestamps.clear()
-    logger.info("Глобальный API кеш очищен")
 
 
-# ========== НОВЫЕ ФУНКЦИИ БАТЧИНГА (с умным кешированием) ==========
+# ========== NEW BATCHING FUNCTIONS (with smart caching) ==========
 
 def fetch_tokens_batch(addresses: List[str], max_batch_size: int = 30) -> Dict[str, Dict[str, Any]]:
     """
-    Получает данные для нескольких токенов одним запросом (батчинг) с умным кешированием.
+    Gets data for multiple tokens with one request (batching) with smart caching.
     """
     if not addresses:
         return {}
     
-    # Фильтруем адреса - проверяем что УЖЕ есть в кеше
+    # Filter addresses - check what's ALREADY in cache
     addresses_to_fetch = []
     cached_results = {}
     
@@ -154,17 +148,17 @@ def fetch_tokens_batch(addresses: List[str], max_batch_size: int = 30) -> Dict[s
         
         if cached_data:
             cached_results[address] = cached_data
-            logger.debug(f"Токен {address[:10]}... взят из кеша")
+            logger.debug(f"Token {address[:10]}... taken from cache")
         else:
             addresses_to_fetch.append(address)
     
-    logger.info(f"Из {len(addresses)} токенов: {len(cached_results)} из кеша, {len(addresses_to_fetch)} нужно запросить")
+    logger.info(f"Of {len(addresses)} tokens: {len(cached_results)} from cache, {len(addresses_to_fetch)} need to request")
     
-    # Если все токены уже в кеше, возвращаем их
+    # If all tokens are already in cache, return them
     if not addresses_to_fetch:
         return cached_results
     
-    # Формируем URL для батч запроса только для недостающих токенов
+    # Формируем URL для батч запроса только для недостающих tokens
     addresses_str = ",".join(addresses_to_fetch)
     url = f"https://api.dexscreener.com/latest/dex/tokens/{addresses_str}"
     
@@ -174,11 +168,11 @@ def fetch_tokens_batch(addresses: List[str], max_batch_size: int = 30) -> Dict[s
     for attempt in range(max_retries):
         try:
             if attempt == 0:
-                logger.info(f"Батч запрос для {len(addresses_to_fetch)} новых токенов")
+                logger.info(f"Батч request для {len(addresses_to_fetch)} новых tokens")
             
             if attempt > 0:
                 delay = random.uniform(2.0, 5.0) * attempt
-                logger.info(f"Повторный батч запрос (попытка {attempt + 1}/{max_retries}) через {delay:.2f} сек...")
+                logger.info(f"Повторный батч request (попытка {attempt + 1}/{max_retries}) через {delay:.2f} сек...")
                 time.sleep(delay)
             
             response = requests.get(url, timeout=20)
@@ -193,26 +187,26 @@ def fetch_tokens_batch(addresses: List[str], max_batch_size: int = 30) -> Dict[s
                         
                         if token_address in addresses_to_fetch:
                             batch_results[token_address] = data
-                            # СОХРАНЯЕМ в глобальный кеш
+                            # Saving в глобальный кеш
                             cache_key = f"token_batch_{token_address}"
                             save_to_global_cache(cache_key, data)
                     
-                    logger.info(f"Получены данные для {len(batch_results)} токенов из {len(addresses_to_fetch)}")
+                    logger.info(f"Получены data для {len(batch_results)} tokens из {len(addresses_to_fetch)}")
                     
-                    # Для токенов без данных создаем пустые результаты
+                    # Для tokens без данных Creating пустые results
                     for address in addresses_to_fetch:
                         if address not in batch_results:
                             empty_data = {"pairs": []}
                             batch_results[address] = empty_data
-                            # Кешируем и пустые результаты
+                            # Кешируем и пустые results
                             cache_key = f"token_batch_{address}"
                             save_to_global_cache(cache_key, empty_data)
                     
-                    # Объединяем кешированные и новые результаты
+                    # Объединяем кешированные и новые results
                     all_results = {**cached_results, **batch_results}
                     return all_results
                 else:
-                    logger.warning(f"API вернуло пустые данные для батча")
+                    logger.warning(f"API вернуло пустые data для батча")
                     continue
                     
             elif response.status_code == 429:
@@ -221,25 +215,25 @@ def fetch_tokens_batch(addresses: List[str], max_batch_size: int = 30) -> Dict[s
                 time.sleep(retry_after)
                 continue
             elif response.status_code in [500, 502, 503, 504]:
-                logger.warning(f"Серверная ошибка {response.status_code} для батча")
+                logger.warning(f"Серверная Error {response.status_code} для батча")
                 continue
             else:
-                logger.warning(f"Ошибка {response.status_code} при батч запросе")
+                logger.warning(f"Error {response.status_code} при батч запросе")
                 continue
                 
         except requests.exceptions.Timeout:
             logger.warning(f"Таймаут при батч запросе (попытка {attempt + 1})")
             continue
         except requests.exceptions.RequestException as e:
-            logger.error(f"Ошибка сети при батч запросе: {str(e)}")
+            logger.error(f"Error сети при батч запросе: {str(e)}")
             continue
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при батч запросе: {str(e)}")
+            logger.error(f"Неожиданная Error при батч запросе: {str(e)}")
             continue
     
     logger.error(f"Все попытки батч запроса исчерпаны")
     
-    # Возвращаем хотя бы кешированные результаты + пустые для неполученных
+    # Возвращаем хотя бы кешированные results + пустые для неполученных
     for address in addresses_to_fetch:
         if address not in batch_results:
             batch_results[address] = {"pairs": []}
@@ -255,15 +249,15 @@ def get_token_info_from_api(query: str) -> Optional[Dict[str, Any]]:
     """
     МОДИФИЦИРОВАННАЯ функция - теперь проверяет глобальный кеш ПЕРЕД запросом.
     """
-    # Проверяем глобальный кеш (возможно батч уже получил эти данные)
+    # Checking глобальный кеш (возможно батч уже получил эти data)
     cache_key = f"token_batch_{query}"
     cached_data = get_from_global_cache(cache_key)
     
     if cached_data:
-        logger.info(f"Токен {query[:10]}... найден в глобальном кеше (избежали дублирования!)")
+        logger.info(f"token {query[:10]}... найден в глобальном кеше (избежали дублирования!)")
         return cached_data
     
-    # Если нет в глобальном кеше, делаем обычный запрос
+    # Если нет в глобальном кеше, делаем обычный request
     try:
         from config import DEXSCREENER_API_URL
         
@@ -277,11 +271,11 @@ def get_token_info_from_api(query: str) -> Optional[Dict[str, Any]]:
         for attempt in range(max_retries):
             try:
                 if attempt == 0:
-                    logger.debug(f"Индивидуальный запрос к API для токена: {query}")
+                    logger.debug(f"Индивидуальный request к API для token: {query}")
                 
                 if attempt > 0:
                     delay = random.uniform(2.0, 5.0) * attempt
-                    logger.info(f"Повторный запрос API (попытка {attempt + 1}/{max_retries}) через {delay:.2f} сек...")
+                    logger.info(f"Повторный request API (попытка {attempt + 1}/{max_retries}) через {delay:.2f} сек...")
                     time.sleep(delay)
                 
                 response = requests.get(primary_url, timeout=20)
@@ -290,38 +284,38 @@ def get_token_info_from_api(query: str) -> Optional[Dict[str, Any]]:
                     data = response.json()
                     
                     if data and data.get('pairs'):
-                        logger.info(f"Успешно получены данные для токена {query}")
-                        # СОХРАНЯЕМ в глобальный кеш для будущих батчей
+                        logger.info(f"Success получены data для token {query}")
+                        # Saving в глобальный кеш для будущих батчей
                         save_to_global_cache(cache_key, data)
                         return data
                     else:
-                        logger.warning(f"API вернуло пустые данные для токена {query}")
+                        logger.warning(f"API вернуло пустые data для token {query}")
                         continue
                         
                 elif response.status_code == 429:
                     retry_after = int(response.headers.get('Retry-After', 60))
-                    logger.warning(f"Rate limit (429) для токена {query}. Ожидание {retry_after} секунд...")
+                    logger.warning(f"Rate limit (429) для token {query}. Ожидание {retry_after} секунд...")
                     time.sleep(retry_after)
                     continue
                 elif response.status_code in [500, 502, 503, 504]:
-                    logger.warning(f"Серверная ошибка {response.status_code} для токена {query}")
+                    logger.warning(f"Серверная Error {response.status_code} для token {query}")
                     continue
                 else:
-                    logger.warning(f"Ошибка API {response.status_code} для токена {query}")
+                    logger.warning(f"API error {response.status_code} для token {query}")
                     continue
                     
             except requests.exceptions.Timeout:
-                logger.warning(f"Таймаут API для токена {query} (попытка {attempt + 1})")
+                logger.warning(f"Таймаут API для token {query} (попытка {attempt + 1})")
                 continue
             except Exception as e:
-                logger.error(f"Ошибка API для токена {query}: {str(e)}")
+                logger.error(f"API error для token {query}: {str(e)}")
                 continue
         
-        logger.error(f"Все попытки API исчерпаны для токена {query}")
+        logger.error(f"Все попытки API исчерпаны для token {query}")
         return None
         
     except Exception as e:
-        logger.error(f"Критическая ошибка в get_token_info_from_api для токена {query}: {str(e)}")
+        logger.error(f"Критическая Error in get_token_info_from_api для token {query}: {str(e)}")
         return None
 
 
@@ -330,12 +324,12 @@ def fetch_dex_data(contract_address: str) -> Dict[str, Any]:
     """
     МОДИФИЦИРОВАННАЯ функция - теперь проверяет глобальный кеш ПЕРЕД запросом.
     """
-    # Проверяем глобальный кеш
+    # Checking глобальный кеш
     cache_key = f"token_batch_{contract_address}"
     cached_data = get_from_global_cache(cache_key)
     
     if cached_data:
-        logger.info(f"DEX данные для {contract_address[:10]}... найдены в глобальном кеше")
+        logger.info(f"DEX data для {contract_address[:10]}... найдены в глобальном кеше")
         return cached_data
     
     # Остальная логика как была...
@@ -345,19 +339,19 @@ def fetch_dex_data(contract_address: str) -> Dict[str, Any]:
     for attempt in range(max_retries):
         try:
             if attempt == 0:
-                logger.info(f"Индивидуальный запрос данных о DEX для контракта: {contract_address}")
+                logger.info(f"Индивидуальный request данных о DEX для контракта: {contract_address}")
             
             if attempt > 0:
                 delay = random.uniform(1.0, 3.0) * attempt
-                logger.info(f"Повторный запрос DEX (попытка {attempt + 1}/{max_retries}) через {delay:.2f} сек...")
+                logger.info(f"Повторный request DEX (попытка {attempt + 1}/{max_retries}) через {delay:.2f} сек...")
                 time.sleep(delay)
             
             response = requests.get(url, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"Успешно получены данные о DEX для контракта: {contract_address}")
-                # СОХРАНЯЕМ в глобальный кеш
+                logger.info(f"Success получены data о DEX для контракта: {contract_address}")
+                # Saving в глобальный кеш
                 save_to_global_cache(cache_key, data)
                 return data
             elif response.status_code == 429:
@@ -366,98 +360,28 @@ def fetch_dex_data(contract_address: str) -> Dict[str, Any]:
                 time.sleep(retry_after)
                 continue
             elif response.status_code in [500, 502, 503, 504]:
-                logger.warning(f"Серверная ошибка {response.status_code} для контракта {contract_address}")
+                logger.warning(f"Серверная Error {response.status_code} для контракта {contract_address}")
                 continue
             else:
-                logger.warning(f"Ошибка {response.status_code} при запросе данных о DEX для контракта {contract_address}")
+                logger.warning(f"Error {response.status_code} при запросе данных о DEX для контракта {contract_address}")
                 continue
                 
         except requests.exceptions.Timeout:
             logger.warning(f"Таймаут при запросе данных для контракта {contract_address} (попытка {attempt + 1})")
             continue
         except Exception as e:
-            logger.error(f"Ошибка при запросе данных для контракта {contract_address}: {str(e)}")
+            logger.error(f"Error при запросе данных для контракта {contract_address}: {str(e)}")
             continue
     
     logger.error(f"Все попытки исчерпаны для контракта {contract_address}")
     return {"pairs": []}
 
 
-# ========== ФУНКЦИИ СТАТИСТИКИ ==========
-
-def get_cache_stats() -> Dict[str, Any]:
-    """Возвращает статистику использования кеша"""
-    current_time = time.time()
-    
-    # Подсчитываем актуальные записи
-    fresh_cache_count = 0
-    expired_cache_count = 0
-    
-    for key, timestamp in _cache_timestamps.items():
-        age = current_time - timestamp
-        if age < _cache_timeout:
-            fresh_cache_count += 1
-        else:
-            expired_cache_count += 1
-    
-    return {
-        "global_cache_size": len(_global_api_cache),
-        "fresh_entries": fresh_cache_count,
-        "expired_entries": expired_cache_count,
-        "cache_timeout": _cache_timeout,
-        "cache_hit_ratio": f"{(fresh_cache_count / max(len(_global_api_cache), 1)) * 100:.1f}%"
-    }
 
 
 # ========== ОСТАЛЬНЫЕ ФУНКЦИИ без изменений ==========
 
-def process_batch_requests(token_batches: List[List[str]]) -> Dict[str, Dict[str, Any]]:
-    """Обрабатывает несколько батчей токенов с задержками между запросами."""
-    all_results = {}
-    
-    for i, batch in enumerate(token_batches):
-        if not batch:
-            continue
-            
-        logger.info(f"Обработка батча {i+1}/{len(token_batches)} с {len(batch)} токенами")
-        
-        if i > 0:
-            delay = random.uniform(1.0, 3.0)
-            logger.debug(f"Задержка {delay:.2f}с между батчами")
-            time.sleep(delay)
-        
-        batch_results = fetch_tokens_batch(batch)
-        all_results.update(batch_results)
-    
-    logger.info(f"Обработано {len(token_batches)} батчей, получено данных для {len(all_results)} токенов")
-    return all_results
 
 
-def split_into_batches(addresses: List[str], batch_size: int = 30) -> List[List[str]]:
-    """Разбивает список адресов на батчи заданного размера."""
-    batches = []
-    for i in range(0, len(addresses), batch_size):
-        batch = addresses[i:i + batch_size]
-        batches.append(batch)
-    
-    logger.debug(f"Разбито {len(addresses)} адресов на {len(batches)} батчей по {batch_size}")
-    return batches
 
 
-def validate_token_addresses(addresses: List[str]) -> List[str]:
-    """Валидирует и очищает список адресов токенов."""
-    valid_addresses = []
-    
-    for addr in addresses:
-        if not addr or not isinstance(addr, str):
-            continue
-            
-        clean_addr = addr.strip()
-        
-        if len(clean_addr) >= 32 and clean_addr.replace('0x', '').isalnum():
-            valid_addresses.append(clean_addr)
-        else:
-            logger.warning(f"Некорректный адрес токена: {addr}")
-    
-    logger.debug(f"Валидировано {len(valid_addresses)} из {len(addresses)} адресов")
-    return valid_addresses

@@ -1,4 +1,4 @@
-# Создайте новый файл message_parsers.py
+# Создайте новый file message_parsers.py
 import re
 import logging
 from abc import ABC, abstractmethod
@@ -15,7 +15,7 @@ class MessageParser(ABC):
         Проверяет, может ли парсер обработать данный текст.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
             True, если парсер может обработать текст, иначе False
@@ -25,10 +25,10 @@ class MessageParser(ABC):
     @abstractmethod
     def parse(self, text: str) -> Optional[Dict[str, Any]]:
         """
-        Парсит текст сообщения.
+        Парсит текст messages.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
             Словарь с извлеченными данными или None
@@ -38,10 +38,10 @@ class MessageParser(ABC):
     @abstractmethod
     def format(self, data: Dict[str, Any]) -> Optional[str]:
         """
-        Форматирует извлеченные данные в нужный формат.
+        Форматирует извлеченные data в нужный формат.
         
         Args:
-            data: Извлеченные данные
+            data: Извлеченные data
             
         Returns:
             Отформатированный текст или None
@@ -60,32 +60,32 @@ class RayCyanBotParser(MessageParser):
     
     def can_parse(self, text: str) -> bool:
         """
-        Проверяет, может ли парсер обработать сообщение ray_cyan_bot.
+        Проверяет, может ли парсер обработать message ray_cyan_bot.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
-            True, если это сообщение от ray_cyan_bot, иначе False
+            True, если это message от ray_cyan_bot, иначе False
         """
         return "BUY" in text
     
     def parse(self, text: str) -> Optional[Dict[str, Any]]:
         """
-        Парсит сообщение ray_cyan_bot.
+        Парсит message ray_cyan_bot.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
             Словарь с извлеченными данными или None
         """
         try:
-            # Проверяем, что это сообщение о покупке токена
+            # Checking, что это message о покупке token
             if "BUY" not in text:
                 return None
             
-            # Извлекаем название токена
+            # Извлекаем название token
             buy_match = self.buy_pattern.search(text)
             token_name = buy_match.group(1) if buy_match else "UNKNOWN"
             
@@ -129,7 +129,7 @@ class RayCyanBotParser(MessageParser):
                     wallet_matches = self.address_pattern.findall(line)
                     
                     for wallet in wallet_matches:
-                        # Проверяем, что это не похоже на контракт (не последняя строка)
+                        # Checking, что это не похоже на Contract (не последняя строка)
                         if wallet and line != text.split('\n')[-1]:
                             full_wallet = wallet
                             break
@@ -138,7 +138,7 @@ class RayCyanBotParser(MessageParser):
             lines = text.split('\n')
             contract_address = ""
             
-            # Проверяем последнюю строку на наличие контракта
+            # Checking последнюю строку на наличие контракта
             if lines and lines[-1].strip():
                 last_line = lines[-1].strip()
                 
@@ -155,7 +155,7 @@ class RayCyanBotParser(MessageParser):
                             contract_address = contract
                             break
             
-            # Возвращаем извлеченные данные
+            # Возвращаем извлеченные data
             return {
                 'token_name': token_name,
                 'wallet': full_wallet,
@@ -163,17 +163,17 @@ class RayCyanBotParser(MessageParser):
             }
             
         except Exception as e:
-            logger.error(f"Ошибка при парсинге сообщения ray_cyan_bot: {e}")
+            logger.error(f"Error при парсинге messages ray_cyan_bot: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
     
     def format(self, data: Dict[str, Any]) -> Optional[str]:
         """
-        Форматирует извлеченные данные в нужный формат.
+        Форматирует извлеченные data в нужный формат.
         
         Args:
-            data: Извлеченные данные
+            data: Извлеченные data
             
         Returns:
             Отформатированный текст или None
@@ -186,21 +186,21 @@ class RayCyanBotParser(MessageParser):
             wallet = data.get('wallet')
             contract_address = data.get('contract_address', '')
             
-            # Форматируем сообщение по требуемому шаблону
+            # Форматируем message по требуемому шаблону
             formatted_text = f"""🟢 BUY {token_name}"""
             
-            # Добавляем строку с кошельком, если нашли
+            # Adding строку с кошельком, если нашли
             if wallet:
                 formatted_text += f"\nSmart money : {wallet}"
             
-            # Добавляем адрес контракта, если нашли
+            # Adding адрес контракта, если нашли
             if contract_address:
                 formatted_text += f"\n{contract_address}"
             
             return formatted_text
             
         except Exception as e:
-            logger.error(f"Ошибка при форматировании данных ray_cyan_bot: {e}")
+            logger.error(f"Error при форматировании данных ray_cyan_bot: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
@@ -216,28 +216,28 @@ class WhaleAlertParser(MessageParser):
     
     def can_parse(self, text: str) -> bool:
         """
-        Проверяет, может ли парсер обработать сообщение о ките.
+        Проверяет, может ли парсер обработать message о ките.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
-            True, если это сообщение о ките, иначе False
+            True, если это message о ките, иначе False
         """
         return "New Token Whale Alert" in text and "just bought" in text and "just sold" not in text
     
     def parse(self, text: str) -> Optional[Dict[str, Any]]:
         """
-        Парсит сообщение о ките.
+        Парсит message о ките.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
             Словарь с извлеченными данными или None
         """
         try:
-            # Проверяем, что это сообщение о покупке кита
+            # Checking, что это message о покупке кита
             if not ("New Token Whale Alert" in text and "just bought" in text and "just sold" not in text):
                 return None
             
@@ -245,11 +245,11 @@ class WhaleAlertParser(MessageParser):
             whale_info_match = self.whale_info_pattern.search(text)
             whale_info = whale_info_match.group(1).strip() if whale_info_match else ""
             
-            # Если не нашли информацию о ките, это не интересующее нас сообщение
+            # Если не нашли информацию о ките, это не интересующее нас message
             if not whale_info:
                 return None
             
-            # Проверяем, есть ли "just sold" в тексте сообщения (дополнительная проверка)
+            # Checking, есть ли "just sold" в тексте messages (дополнительная Check)
             if "just sold" in whale_info:
                 return None
                 
@@ -261,7 +261,7 @@ class WhaleAlertParser(MessageParser):
             contract_match = self.contract_pattern.search(text)
             contract_address = contract_match.group(1) if contract_match else ""
             
-            # Возвращаем извлеченные данные
+            # Возвращаем извлеченные data
             return {
                 'whale_info': whale_info,
                 'market_cap': mc_info,
@@ -269,17 +269,17 @@ class WhaleAlertParser(MessageParser):
             }
             
         except Exception as e:
-            logger.error(f"Ошибка при парсинге сообщения о ките: {e}")
+            logger.error(f"Error при парсинге messages о ките: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
     
     def format(self, data: Dict[str, Any]) -> Optional[str]:
         """
-        Форматирует извлеченные данные в нужный формат.
+        Форматирует извлеченные data в нужный формат.
         
         Args:
-            data: Извлеченные данные
+            data: Извлеченные data
             
         Returns:
             Отформатированный текст или None
@@ -295,7 +295,7 @@ class WhaleAlertParser(MessageParser):
             # Формируем информацию о маркет капе
             mc_info = f"(MC: ${market_cap})" if market_cap else ""
             
-            # Форматируем сообщение по требуемому шаблону
+            # Форматируем message по требуемому шаблону
             formatted_text = f"""New Token Whale Alert
 🟢 {whale_info} {mc_info}
 
@@ -304,7 +304,7 @@ class WhaleAlertParser(MessageParser):
             return formatted_text
             
         except Exception as e:
-            logger.error(f"Ошибка при форматировании данных о ките: {e}")
+            logger.error(f"Error при форматировании данных о ките: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return None
@@ -321,10 +321,10 @@ class MessageParserFactory:
     
     def get_parser(self, text: str) -> Optional[MessageParser]:
         """
-        Возвращает подходящий парсер для текста сообщения.
+        Возвращает подходящий парсер для текста messages.
         
         Args:
-            text: Текст сообщения
+            text: Текст messages
             
         Returns:
             Парсер сообщений или None, если подходящий парсер не найден
@@ -334,5 +334,5 @@ class MessageParserFactory:
                 return parser
         return None
 
-# Создаем глобальный экземпляр фабрики
+# Creating глобальный экземпляр фабрики
 parser_factory = MessageParserFactory()

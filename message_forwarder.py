@@ -121,7 +121,7 @@ async def extract_and_format_ray_cyan_data(message):
                     wallet_matches = re.findall(r'([a-zA-Z0-9]{40,})', line)
                     
                     for wallet in wallet_matches:
-                        # Проверяем, что это не похоже на контракт (не последняя строка)
+                        # Проверяем, что это не похоже на Contract (не последняя строка)
                         if wallet and line != text.split('\n')[-1]:
                             full_wallet = wallet
                             break
@@ -188,7 +188,7 @@ async def extract_and_format_ray_cyan_data(message):
             formatted_text += f"\n{contract_address}"
         
         # Для отладки показываем, что мы нашли
-        logger.info(f"Найдено - Токен: {token_name}, Кошелек: {full_wallet}, Контракт: {contract_address}")
+        logger.info(f"Найдено - Токен: {token_name}, Кошелек: {full_wallet}, Contract: {contract_address}")
         
         return formatted_text
     except Exception as e:
@@ -250,11 +250,15 @@ async def start_forwarding():
     """Основная функция для запуска пересылки сообщений."""
     logger.info("Сервис пересылки сообщений запущен!")
     
-    # Подключаемся к Telegram
+    # Подключаемся к Telegram (оптимизированный для SOURCE_BOTS только)
     client = TelegramClient('forwarder_session', API_ID, API_HASH)
-    await client.start()
     
-    logger.info("Подключение к Telegram установлено")
+    try:
+        await client.start()
+        logger.info("✅ Подключение к Telegram установлено")
+    except Exception as e:
+        logger.error(f"❌ Ошибка подключения к Telegram: {e}")
+        raise
     
     # Отправляем приветственные сообщения
     try:
@@ -273,98 +277,99 @@ async def start_forwarding():
         logger.info("Приветственное сообщение отправлено в канал @cringemonke2")
     except Exception as e:
         logger.error("Ошибка при отправке приветственного сообщения: {}".format(e))
+        
+    # Небольшая пауза перед началом основной работы
+    await asyncio.sleep(3)
     
-    # Регистрируем обработчик для всех входящих сообщений
-    @client.on(events.NewMessage())
+    # Регистрируем обработчик ТОЛЬКО для отслеживаемых ботов (ОПТИМИЗАЦИЯ ПАМЯТИ!)
+    @client.on(events.NewMessage(from_users=SOURCE_BOTS))
     async def handler(event):
         if not is_running:
             return
             
         try:
-            # Получаем имя отправителя
+            # Получаем имя отправителя (уже отфильтровано по SOURCE_BOTS)
             sender = event.sender
             sender_username = sender.username if sender else "Unknown"
             
-            # Проверяем, что это сообщение от одного из отслеживаемых ботов
-            if sender_username in SOURCE_BOTS:
-                logger.info(f"Получено сообщение от @{sender_username}")
+            logger.info(f"Получено сообщение от @{sender_username}")
+            
+            # Получаем текст сообщения
+            if hasattr(event.message, 'text') and event.message.text:
+                text = event.message.text
                 
-                # Получаем текст сообщения
-                if hasattr(event.message, 'text') and event.message.text:
-                    text = event.message.text
+                # Получаем подходящий парсер
+                parser = parser_factory.get_parser(text)
+                
+                if parser:
+                    # Парсим сообщение
+                    parsed_data = parser.parse(text)
                     
-                    # Получаем подходящий парсер
-                    parser = parser_factory.get_parser(text)
-                    
-                    if parser:
-                        # Парсим сообщение
-                        parsed_data = parser.parse(text)
+                    if parsed_data:
+                        # Форматируем сообщение
+                        formatted_text = parser.format(parsed_data)
                         
-                        if parsed_data:
-                            # Форматируем сообщение
-                            formatted_text = parser.format(parsed_data)
+                        if formatted_text:
+                            # Определяем целевой канал
+                            target_channel = TARGET_CHANNEL
                             
-                            if formatted_text:
-                                # Определяем целевой канал
-                                target_channel = TARGET_CHANNEL
-                                
-                                # Для ray_cyan_bot используем другой канал
-                                if sender_username == "ray_cyan_bot":
-                                    target_channel = "cringemonke2"
-                                
-                                # Отправляем сообщение
-                                try:
-                                    await client.send_message(target_channel, formatted_text)
-                                    logger.info(f"Сообщение от @{sender_username} переслано в @{target_channel}")
-                                except Exception as e:
-                                    logger.error(f"Ошибка при пересылке сообщения: {e}")
-                                    logger.error(traceback.format_exc())
-                        else:
-                            logger.info(f"Не удалось распарсить сообщение от @{sender_username}")
+                            # Для ray_cyan_bot используем другой канал
+                            if sender_username == "ray_cyan_bot":
+                                target_channel = "cringemonke2"
+                            
+                            # Отправляем сообщение
+                            try:
+                                await client.send_message(target_channel, formatted_text)
+                                logger.info(f"Сообщение от @{sender_username} переслано в @{target_channel}")
+                            except Exception as e:
+                                logger.error(f"Ошибка при пересылке сообщения: {e}")
+                                logger.error(traceback.format_exc())
                     else:
-                        # Используем старую логику обработки если парсер не найден
-                        if sender_username == "TheMobyBot":
-                            logger.info("Получено сообщение от @TheMobyBot")
-                            
-                            # ИСПРАВЛЕНИЕ: Проверяем сначала, содержит ли сообщение "just sold"
-                            # Если да, то полностью игнорируем его
-                            if "just sold" in text:
-                                logger.info("Сообщение содержит 'just sold', игнорируем")
-                                return
-                            
-                            # Проверяем, является ли сообщение сообщением о ките
-                            formatted_text = await extract_and_format_whale_alerts(event.message)
-                            
-                            if formatted_text:
-                                logger.info("Обнаружено сообщение о ките, применяем форматирование")
-                            else:
-                                logger.info("Сообщение не распознано как сообщение о ките, пересылаем как есть")
-                            
-                            # Если не удалось отформатировать или это не сообщение о ките, используем оригинальный текст
-                            text_to_send = formatted_text if formatted_text else text
-                            
-                            try:
-                                await client.send_message(TARGET_CHANNEL, text_to_send)
-                                logger.info("Сообщение от @TheMobyBot переслано в @{}".format(TARGET_CHANNEL))
-                            except Exception as e:
-                                logger.error("Ошибка при пересылке сообщения от TheMobyBot: {}".format(e))
-                                logger.error(traceback.format_exc())
+                        logger.info(f"Не удалось распарсить сообщение от @{sender_username}")
+                else:
+                    # Используем старую логику обработки если парсер не найден
+                    if sender_username == "TheMobyBot":
+                        logger.info("Получено сообщение от @TheMobyBot")
                         
-                        elif sender_username == "ray_cyan_bot":
-                            logger.info("Получено сообщение от @ray_cyan_bot")
-                            
-                            # Применяем фильтр и форматирование для ray_cyan_bot
-                            formatted_text = await extract_and_format_ray_cyan_data(event.message)
-                            
-                            # Если не удалось отформатировать, используем оригинальный текст
-                            text_to_send = formatted_text if formatted_text else text
-                            
-                            try:
-                                await client.send_message("cringemonke2", text_to_send)
-                                logger.info("Сообщение от @ray_cyan_bot переслано в @cringemonke2")
-                            except Exception as e:
-                                logger.error("Ошибка при пересылке сообщения от ray_cyan_bot: {}".format(e))
-                                logger.error(traceback.format_exc())
+                        # ИСПРАВЛЕНИЕ: Проверяем сначала, содержит ли сообщение "just sold"
+                        # Если да, то полностью игнорируем его
+                        if "just sold" in text:
+                            logger.info("Сообщение содержит 'just sold', игнорируем")
+                            return
+                        
+                        # Проверяем, является ли сообщение сообщением о ките
+                        formatted_text = await extract_and_format_whale_alerts(event.message)
+                        
+                        if formatted_text:
+                            logger.info("Обнаружено сообщение о ките, применяем форматирование")
+                        else:
+                            logger.info("Сообщение не распознано как сообщение о ките, пересылаем как есть")
+                        
+                        # Если не удалось отформатировать или это не сообщение о ките, используем оригинальный текст
+                        text_to_send = formatted_text if formatted_text else text
+                        
+                        try:
+                            await client.send_message(TARGET_CHANNEL, text_to_send)
+                            logger.info("Сообщение от @TheMobyBot переслано в @{}".format(TARGET_CHANNEL))
+                        except Exception as e:
+                            logger.error("Ошибка при пересылке сообщения от TheMobyBot: {}".format(e))
+                            logger.error(traceback.format_exc())
+                    
+                    elif sender_username == "ray_cyan_bot":
+                        logger.info("Получено сообщение от @ray_cyan_bot")
+                        
+                        # Применяем фильтр и форматирование для ray_cyan_bot
+                        formatted_text = await extract_and_format_ray_cyan_data(event.message)
+                        
+                        # Если не удалось отформатировать, используем оригинальный текст
+                        text_to_send = formatted_text if formatted_text else text
+                        
+                        try:
+                            await client.send_message("cringemonke2", text_to_send)
+                            logger.info("Сообщение от @ray_cyan_bot переслано в @cringemonke2")
+                        except Exception as e:
+                            logger.error("Ошибка при пересылке сообщения от ray_cyan_bot: {}".format(e))
+                            logger.error(traceback.format_exc())
             
         except Exception as e:
             logger.error("Ошибка при обработке сообщения: {}".format(e))
@@ -379,7 +384,7 @@ async def start_forwarding():
     except KeyboardInterrupt:
         logger.info("Сервис остановлен пользователем")
     except Exception as e:
-        logger.error("Ошибка в основном цикле: {}".format(e))
+        logger.error("Error in основном цикле: {}".format(e))
         logger.error(traceback.format_exc())
     finally:
         await client.disconnect()
