@@ -51,7 +51,14 @@ def safe_str(text):
 from config import TELEGRAM_TOKEN, DEXSCREENER_API_URL, API_ID, API_HASH, TARGET_BOT
 
 # Минимальное количество каналов для отправки сигнала в RadarDexBot
-MIN_SIGNALS = 20  # Токен должен появиться минимум в 20 каналах
+MIN_SIGNALS = 22  # Токен должен появиться минимум в 20 каналах
+
+def set_min_signals(new_value):
+    """Функция для изменения MIN_SIGNALS в рантайме."""
+    global MIN_SIGNALS
+    MIN_SIGNALS = new_value
+    logger.info(f"⚙️ MIN_SIGNALS изменен на {new_value}")
+    return MIN_SIGNALS
 
 # Словарь соответствия тегов и эмодзи
 TAG_EMOJI_MAP = {
@@ -100,7 +107,7 @@ SOURCE_CHANNELS = {
     2380594298: {"name": "@whaleBuyBotFree", "tag": "Whale Bought"},
     2249008099: {"name": "@SIGNALMEVX", "tag": "TG_KOL"},
     1700113598: {"name": "@KhronosAllChain", "tag": "TG_KOL"},
-    2305781763: {"name": "@mevxpfdexpaid", "tag": "TG_KOL"},
+    #2305781763: {"name": "@mevxpfdexpaid", "tag": "TG_KOL"},
     2589360530: {"name": "@AveSignalMonitor", "tag": "TG_KOL"},
     2531914184: {"name": "@astrasolcalls", "tag": "TG_KOL"},
     1419575394: {"name": "@WizzyTrades", "tag": "TG_KOL"},
@@ -387,23 +394,30 @@ def cleanup_old_tokens():
         conn = sqlite3.connect(TRACKER_DB_PATH)
         cursor = conn.cursor()
         
-        # Сначала считаем
-        cursor.execute('SELECT COUNT(*) FROM tokens WHERE first_seen < ? AND channel_count < ?', 
-                      (cutoff_time_str, MIN_SIGNALS))
+        # Сначала считаем (удаляем только неотправленные токены)
+        cursor.execute('SELECT COUNT(*) FROM tokens WHERE first_seen < ? AND message_sent = 0', 
+                      (cutoff_time_str,))
         to_delete = cursor.fetchone()[0]
-        logger.info(f"📊 Найдено {to_delete} токенов для удаления")
+        logger.info(f"📊 Найдено {to_delete} неотправленных токенов для удаления")
         
         cursor.execute('''
         DELETE FROM tokens 
         WHERE first_seen < ? 
-        AND channel_count < ?
-        ''', (cutoff_time_str, MIN_SIGNALS))
+        AND message_sent = 0
+        ''', (cutoff_time_str,))
         
         deleted = cursor.rowcount
+        
+        # Логируем статистику отправленных токенов (которые НЕ удаляем)
+        cursor.execute('SELECT COUNT(*) FROM tokens WHERE first_seen < ? AND message_sent = 1', 
+                      (cutoff_time_str,))
+        sent_tokens_count = cursor.fetchone()[0]
+        
         conn.commit()
         conn.close()
         
-        logger.info(f"✅ Удалено {deleted} токенов")
+        logger.info(f"✅ Удалено {deleted} неотправленных токенов")
+        logger.info(f"💌 Сохранено {sent_tokens_count} отправленных токенов (защищены от удаления)")
 
         if deleted > 0:
             # Удаляем из памяти тоже
@@ -417,7 +431,8 @@ def cleanup_old_tokens():
                         first_seen_obj = datetime.strptime(first_seen_str, "%Y-%m-%d %H:%M:%S")
                         channel_count = data.get('channel_count', 0)
                         
-                        if first_seen_obj < cutoff_time_obj and channel_count < MIN_SIGNALS:
+                        message_sent = data.get('message_sent', False)
+                        if first_seen_obj < cutoff_time_obj and not message_sent:
                             tokens_to_remove.append(contract)
                 except:
                     continue

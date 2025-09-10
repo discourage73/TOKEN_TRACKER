@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import List, Optional
 from telegram import Update, BotCommand
 from telegram.ext import Application, ContextTypes
@@ -170,8 +171,12 @@ async def handle_callback_router(update: Update, context: ContextTypes.DEFAULT_T
         # Обработка токен-команд
         elif query.data == "tokens_list":
             await handle_tokens_list(query, context)
-        elif query.data == "tokens_clear":
-            await handle_tokens_clear(query, context)
+        elif query.data == "tokens_signals":
+            await handle_tokens_signals(query, context)
+        elif query.data.startswith("signals_set_"):
+            # Обработка изменения количества сигналов
+            signals_count = int(query.data.replace("signals_set_", ""))
+            await handle_signals_change(query, context, signals_count)
         elif query.data == "tokens_analytics":
             await handle_tokens_analytics(query, context)
         elif query.data == "tokens_stats":
@@ -237,7 +242,7 @@ async def show_tokens_menu(query, context):
     keyboard = [
         [
             InlineKeyboardButton("📋 List", callback_data="tokens_list"),
-            InlineKeyboardButton("🗑️ Clear", callback_data="tokens_clear"),
+            InlineKeyboardButton("🚨 Signals", callback_data="tokens_signals"),
         ],
         [
             InlineKeyboardButton("📊 Analytics", callback_data="tokens_analytics"),
@@ -287,17 +292,55 @@ async def handle_tokens_list(query, context):
     message = "📋 *Список отслеживаемых токенов*\n\nИспользуйте команду `/list` для получения полного списка"
     await query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN)
 
-async def handle_tokens_clear(query, context):
-    """Очистка токенов."""
-    await query.answer("🗑️ Очистка токенов")
-    message = "🗑️ *Очистка токенов*\n\nФункция очистки токенов из мониторинга"
-    await query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN)
 
 async def handle_tokens_analytics(query, context):
-    """Аналитика токенов."""
-    await query.answer("📊 Аналитика токенов")
-    message = "📊 *Аналитика токенов*\n\nФункция генерации аналитики по токенам"
-    await query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN)
+    """Экспорт аналитики токенов в Excel."""
+    try:
+        # Уведомляем о начале процесса
+        await query.edit_message_text("📊 Генерирую Excel файл с аналитикой токенов...")
+        
+        # Создаем Excel файл
+        from analytics_export import handle_analytics_export
+        filepath = handle_analytics_export()
+        
+        # Отправляем файл
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        with open(filepath, 'rb') as file:
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=file,
+                filename=os.path.basename(filepath),
+                caption="📊 *Аналитика токенов*\n\nФайл содержит данные из mcap monitoring и tokens таблиц",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        
+        # Возвращаемся к меню токенов
+        keyboard = [[InlineKeyboardButton("↩️ Back to Tokens", callback_data="admin_tokens")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            "✅ *Excel файл с аналитикой отправлен!*\n\nФайл содержит:\n"
+            "- Все данные токенов из мониторинга\n"
+            "- Информацию о сигналах и каналах\n"
+            "- Market cap динамику\n"
+            "- Статистику и множители",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=reply_markup
+        )
+        
+        # Удаляем временный файл
+        try:
+            os.remove(filepath)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"Ошибка при создании аналитики: {e}")
+        await query.edit_message_text(
+            "❌ *Ошибка при генерации аналитики*\n\nПопробуйте позже или обратитесь к разработчику",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def handle_tokens_stats(query, context):
     """Показывает кнопки выбора периода статистики."""
@@ -519,6 +562,69 @@ async def handle_confirm_remove_user(query, context):
     else:
         await query.answer(f"❌ Ошибка удаления пользователя {user_id}")
     await handle_users_remove(query, context)
+
+# ============================================================================
+# ОБРАБОТКА СИГНАЛОВ
+# ============================================================================
+
+async def handle_tokens_signals(query, context):
+    """Обработка меню управления сигналами."""
+    try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        # Получаем текущее значение MIN_SIGNALS из solana_contract_tracker
+        from solana_contract_tracker import MIN_SIGNALS
+        
+        message = (
+            f"🚨 *Настройка сигналов*\n\n"
+            f"Текущее количество: *{MIN_SIGNALS}* сигналов\n\n"
+            "Выберите новое количество сигналов:"
+        )
+        
+        # Создаем кнопки с разными значениями
+        keyboard = [
+            [
+                InlineKeyboardButton("5", callback_data="signals_set_5"),
+                InlineKeyboardButton("15", callback_data="signals_set_15"),
+                InlineKeyboardButton("20", callback_data="signals_set_20"),
+                InlineKeyboardButton("21", callback_data="signals_set_21"),
+            ],
+            [
+                InlineKeyboardButton("22", callback_data="signals_set_22"),
+                InlineKeyboardButton("23", callback_data="signals_set_23"),
+                InlineKeyboardButton("24", callback_data="signals_set_24"),
+                InlineKeyboardButton("25", callback_data="signals_set_25"),
+            ],
+            [
+                InlineKeyboardButton("⬆️ Назад к Токенам", callback_data="admin_tokens")
+            ]
+        ]
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(message, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при показе меню сигналов: {e}")
+        await query.answer("❌ Произошла ошибка")
+
+async def handle_signals_change(query, context, new_signals_count):
+    """Обработка изменения количества сигналов."""
+    try:
+        # Изменяем MIN_SIGNALS в solana_contract_tracker
+        from solana_contract_tracker import set_min_signals
+        
+        # Обновляем значение
+        set_min_signals(new_signals_count)
+        
+        await query.answer(f"✅ Количество сигналов изменено на {new_signals_count}")
+        
+        # Показываем обновленное меню
+        await handle_tokens_signals(query, context)
+        
+        logger.info(f"✅ Админ {query.from_user.id} изменил MIN_SIGNALS на {new_signals_count}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при изменении сигналов: {e}")
+        await query.answer("❌ Ошибка при изменении")
 
 # ============================================================================
 # НАСТРОЙКА КОМАНД БОТА

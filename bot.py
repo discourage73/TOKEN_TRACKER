@@ -1,5 +1,6 @@
 import logging
 import asyncio
+
 from typing import Optional
 
 from telegram import Update
@@ -143,10 +144,22 @@ async def handle_token_request(update: Update, context: ContextTypes.DEFAULT_TYP
                 bot_logger.info(f"📤 Начинаем рассылку токена всем активным пользователям...")
                 await broadcast_token_to_all_users(contract_address, token_data)
                 
+                # Пересылаем контракт в группу Cryptmonkeygroup
+                GROUP_CHAT_ID = "-1003087918593"  # ID группы "Криптообезьяна на луне Chat"
+                try:
+                    await context.bot.send_message(
+                        chat_id=GROUP_CHAT_ID,
+                        text=f"🚀 *New Contract Alert*\n\n{contract_address}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    bot_logger.info(f"✅ Контракт переслан в группу: {contract_address}")
+                except Exception as e:
+                    bot_logger.error(f"❌ Ошибка пересылки в группу: {e}")
+                
                 # Отправляем подтверждение TARGET_BOT
                 token_ticker = token_data.get('ticker', contract_address[:8] + '...')
                 await update.message.reply_text(
-                    f"✅ Токен {token_ticker} разослан всем активным пользователям",
+                    f"✅ Токен {token_ticker} разослан всем активным пользователям + переслан в группу",
                     parse_mode=ParseMode.MARKDOWN
                 )
             else:
@@ -390,20 +403,20 @@ async def post_init(application: Application) -> None:
             # Ежедневная задача
             job_queue.run_daily(
                 callback=daily_stats_job,
-                time=time(hour=14, minute=50),  # 14:50 каждый день
+                time=time(hour=11, minute=50),  # 11:50 UTC = 14:50 местного времени
                 name="daily_token_stats"
             )
             
             # Добавляем retry задачи на случай пропуска основной
             job_queue.run_daily(
                 callback=daily_stats_job,
-                time=time(hour=14, minute=52),  # +2 минуты retry
+                time=time(hour=11, minute=52),  # +2 минуты retry
                 name="daily_token_stats_retry1"
             )
             
             job_queue.run_daily(
                 callback=daily_stats_job,
-                time=time(hour=14, minute=55),  # +5 минут retry
+                time=time(hour=11, minute=55),  # +5 минут retry
                 name="daily_token_stats_retry2"
             )
             
@@ -412,18 +425,23 @@ async def post_init(application: Application) -> None:
             today_1450 = now.replace(hour=14, minute=50, second=0, microsecond=0)
             
             if now < today_1450:
-                # Если 14:50 еще не было сегодня - запланируем на сегодня
-                seconds_until_1450 = (today_1450 - now).total_seconds()
-                job_queue.run_once(
-                    callback=daily_stats_job,
-                    when=seconds_until_1450,
-                    name="daily_token_stats_today"
-                )
-                print(f"STATS: Статистика будет отправлена через {int(seconds_until_1450)} секунд в 14:50")
+                # Если 14:50 еще не было сегодня - запланируем на сегодня в UTC
+                # Переводим в UTC (минус 3 часа)
+                today_1150_utc = now.replace(hour=11, minute=50, second=0, microsecond=0)
+                if now < today_1150_utc:
+                    seconds_until_1150 = (today_1150_utc - now).total_seconds()
+                    job_queue.run_once(
+                        callback=daily_stats_job,
+                        when=seconds_until_1150,
+                        name="daily_token_stats_today"
+                    )
+                    print(f"STATS: Статистика будет отправлена через {int(seconds_until_1150)} секунд в 14:50")
+                else:
+                    print("STATS: 14:50 уже прошло сегодня, статистика будет завтра")
             else:
                 print("STATS: 14:50 уже прошло сегодня, статистика будет завтра")
             
-            bot_logger.info("📊 Настроена ежедневная отправка статистики в 14:50 (+ retry в 14:52 и 14:55)")
+            bot_logger.info("📊 Настроена ежедневная отправка статистики в 14:50 местного времени (+ retry в 14:52 и 14:55)")
         
         bot_logger.info("✅ Бот успешно инициализирован")
         
